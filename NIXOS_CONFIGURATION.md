@@ -2,6 +2,8 @@
 
 This guide shows how to configure Momoi declaratively using Nix language on NixOS or Home Manager.
 
+> **💡 New to Momoi?** Check out [INSTALLATION.md](./INSTALLATION.md) for easy setup instructions!
+
 ## Table of Contents
 
 - [Quick Start](#quick-start)
@@ -11,20 +13,18 @@ This guide shows how to configure Momoi declaratively using Nix language on NixO
 
 ## Quick Start
 
-### 1. Add Momoi to your flake inputs
+The easiest way to use Momoi:
 
 ```nix
+# In flake.nix
 {
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    momoi.url = "github:chikof/momoi";
-  };
+  inputs.momoi.url = "github:chikof/momoi";
 
-  outputs = { self, nixpkgs, momoi, ... }: {
+  outputs = { nixpkgs, momoi, ... }@inputs: {
     nixosConfigurations.yourhost = nixpkgs.lib.nixosSystem {
-      system = "x86_64-linux";
+      specialArgs = { inherit inputs; };
       modules = [
-        momoi.nixosModules.default
+        (momoi.nixosModules.autoload { inherit inputs; })  # One line setup!
         ./configuration.nix
       ];
     };
@@ -32,20 +32,20 @@ This guide shows how to configure Momoi declaratively using Nix language on NixO
 }
 ```
 
-### 2. Enable and configure in configuration.nix
-
 ```nix
+# In configuration.nix
 {
-  services.momoi = {
-    enable = true;
-    
-    settings.general = {
-      logLevel = "info";
-      defaultTransition = "fade";
-    };
-  };
+  services.momoi.enable = true;
+  services.momoi.settings.outputs = [
+    {
+      name = "HDMI-1";
+      wallpaper = "~/wallpaper.jpg";
+    }
+  ];
 }
 ```
+
+For other installation methods, see [INSTALLATION.md](./INSTALLATION.md).
 
 ## Basic Configuration
 
@@ -55,10 +55,10 @@ This guide shows how to configure Momoi declaratively using Nix language on NixO
 {
   services.momoi = {
     enable = true;
-    
+
     settings = {
       general.defaultTransition = "fade";
-      
+
       outputs = [
         {
           name = "DP-1";
@@ -79,7 +79,7 @@ Automatically rotate through wallpapers:
 {
   services.momoi = {
     enable = true;
-    
+
     settings.playlist = {
       enabled = true;
       interval = 300;  # Change every 5 minutes
@@ -104,7 +104,7 @@ Switch wallpapers based on time of day:
 {
   services.momoi = {
     enable = true;
-    
+
     settings.schedule = [
       {
         name = "Morning";
@@ -153,7 +153,7 @@ Different wallpapers per monitor:
 {
   services.momoi = {
     enable = true;
-    
+
     settings.outputs = [
       {
         name = "DP-1";  # Main monitor
@@ -188,7 +188,7 @@ Create reusable shader configurations:
 {
   services.momoi = {
     enable = true;
-    
+
     settings.shaderPresets = [
       {
         name = "calm-ocean";
@@ -240,6 +240,7 @@ Create reusable shader configurations:
 ```
 
 Then use presets via CLI:
+
 ```bash
 wwctl shader plasma --preset calm-ocean
 wwctl shader matrix --preset matrix-classic
@@ -253,7 +254,7 @@ Full-featured configuration with all options:
 {
   services.momoi = {
     enable = true;
-    
+
     settings = {
       # General settings
       general = {
@@ -262,7 +263,7 @@ Full-featured configuration with all options:
         defaultDuration = 500;
         defaultScale = "fill";
       };
-      
+
       # Playlist configuration
       playlist = {
         enabled = true;
@@ -277,7 +278,7 @@ Full-featured configuration with all options:
         ];
         extensions = [ "jpg" "jpeg" "png" "webp" "gif" ];
       };
-      
+
       # Time-based schedules
       schedule = [
         {
@@ -297,7 +298,7 @@ Full-featured configuration with all options:
           duration = 1500;
         }
       ];
-      
+
       # Per-output configuration
       outputs = [
         {
@@ -308,7 +309,7 @@ Full-featured configuration with all options:
           duration = 500;
         }
       ];
-      
+
       # Wallpaper collections
       collections = [
         {
@@ -329,7 +330,7 @@ Full-featured configuration with all options:
           ];
         }
       ];
-      
+
       # Shader presets
       shaderPresets = [
         {
@@ -351,7 +352,7 @@ Full-featured configuration with all options:
           count = 300;
         }
       ];
-      
+
       # Performance and resource management
       advanced = {
         enableVideo = true;
@@ -375,78 +376,78 @@ Full-featured configuration with all options:
 
 ### General Settings
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `logLevel` | enum | `"info"` | Log level: `trace`, `debug`, `info`, `warn`, `error` |
-| `defaultTransition` | enum | `"fade"` | Default transition effect |
-| `defaultDuration` | int | `500` | Default transition duration (ms) |
-| `defaultScale` | enum | `"fill"` | Default scaling mode: `center`, `fill`, `fit`, `stretch`, `tile` |
+| Option              | Type | Default  | Description                                                      |
+| ------------------- | ---- | -------- | ---------------------------------------------------------------- |
+| `logLevel`          | enum | `"info"` | Log level: `trace`, `debug`, `info`, `warn`, `error`             |
+| `defaultTransition` | enum | `"fade"` | Default transition effect                                        |
+| `defaultDuration`   | int  | `500`    | Default transition duration (ms)                                 |
+| `defaultScale`      | enum | `"fill"` | Default scaling mode: `center`, `fill`, `fit`, `stretch`, `tile` |
 
 ### Playlist Settings
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enabled` | bool | `true` | Enable playlist mode |
-| `interval` | int | `300` | Rotation interval (seconds) |
-| `shuffle` | bool | `false` | Shuffle playlist order |
-| `transition` | string | `"fade"` | Transition effect |
-| `transitionDuration` | int | `500` | Transition duration (ms) |
-| `sources` | list | `[]` | Wallpaper sources (paths/globs) |
-| `extensions` | list | `[...]` | File extensions to include |
+| Option               | Type   | Default  | Description                     |
+| -------------------- | ------ | -------- | ------------------------------- |
+| `enabled`            | bool   | `true`   | Enable playlist mode            |
+| `interval`           | int    | `300`    | Rotation interval (seconds)     |
+| `shuffle`            | bool   | `false`  | Shuffle playlist order          |
+| `transition`         | string | `"fade"` | Transition effect               |
+| `transitionDuration` | int    | `500`    | Transition duration (ms)        |
+| `sources`            | list   | `[]`     | Wallpaper sources (paths/globs) |
+| `extensions`         | list   | `[...]`  | File extensions to include      |
 
 ### Schedule Entry
 
-| Option | Type | Description |
-|--------|------|-------------|
-| `name` | string | Entry name |
-| `startTime` | string | Start time (HH:MM) |
-| `endTime` | string | End time (HH:MM) |
-| `wallpaper` | string | Wallpaper path |
-| `transition` | string | Transition effect |
-| `duration` | int | Transition duration (ms) |
+| Option       | Type   | Description              |
+| ------------ | ------ | ------------------------ |
+| `name`       | string | Entry name               |
+| `startTime`  | string | Start time (HH:MM)       |
+| `endTime`    | string | End time (HH:MM)         |
+| `wallpaper`  | string | Wallpaper path           |
+| `transition` | string | Transition effect        |
+| `duration`   | int    | Transition duration (ms) |
 
 ### Output Configuration
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `name` | string | - | Output name (e.g., "DP-1") |
-| `wallpaper` | string? | `null` | Wallpaper path |
-| `scale` | string | `"fill"` | Scaling mode |
-| `transition` | string | `"fade"` | Transition effect |
-| `duration` | int | `500` | Transition duration (ms) |
-| `playlist` | bool | `false` | Enable playlist |
-| `playlistSources` | list | `[]` | Playlist sources |
+| Option            | Type    | Default  | Description                |
+| ----------------- | ------- | -------- | -------------------------- |
+| `name`            | string  | -        | Output name (e.g., "DP-1") |
+| `wallpaper`       | string? | `null`   | Wallpaper path             |
+| `scale`           | string  | `"fill"` | Scaling mode               |
+| `transition`      | string  | `"fade"` | Transition effect          |
+| `duration`        | int     | `500`    | Transition duration (ms)   |
+| `playlist`        | bool    | `false`  | Enable playlist            |
+| `playlistSources` | list    | `[]`     | Playlist sources           |
 
 ### Shader Preset
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `name` | string | - | Preset name |
-| `shader` | enum | - | Shader type: `plasma`, `waves`, `matrix`, `gradient`, `starfield`, `raymarching`, `tunnel` |
-| `description` | string | `""` | Description |
-| `speed` | float? | `null` | Animation speed multiplier |
-| `color1` | string? | `null` | Primary color (hex) |
-| `color2` | string? | `null` | Secondary color (hex) |
-| `color3` | string? | `null` | Tertiary color (hex) |
-| `scale` | float? | `null` | Scale parameter |
-| `intensity` | float? | `null` | Intensity (0.0-1.0) |
-| `count` | int? | `null` | Count parameter |
+| Option        | Type    | Default | Description                                                                                |
+| ------------- | ------- | ------- | ------------------------------------------------------------------------------------------ |
+| `name`        | string  | -       | Preset name                                                                                |
+| `shader`      | enum    | -       | Shader type: `plasma`, `waves`, `matrix`, `gradient`, `starfield`, `raymarching`, `tunnel` |
+| `description` | string  | `""`    | Description                                                                                |
+| `speed`       | float?  | `null`  | Animation speed multiplier                                                                 |
+| `color1`      | string? | `null`  | Primary color (hex)                                                                        |
+| `color2`      | string? | `null`  | Secondary color (hex)                                                                      |
+| `color3`      | string? | `null`  | Tertiary color (hex)                                                                       |
+| `scale`       | float?  | `null`  | Scale parameter                                                                            |
+| `intensity`   | float?  | `null`  | Intensity (0.0-1.0)                                                                        |
+| `count`       | int?    | `null`  | Count parameter                                                                            |
 
 ### Advanced Settings
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `enableVideo` | bool | `true` | Enable video support |
-| `videoMuted` | bool | `true` | Mute video audio |
-| `videoLoop` | bool | `true` | Loop videos |
-| `maxFps` | int | `60` | Maximum FPS |
-| `cacheLimitMb` | int | `500` | Cache size limit (MB) |
-| `preloadNext` | bool | `true` | Preload next wallpaper |
-| `performanceMode` | enum | `"balanced"` | Mode: `performance`, `balanced`, `powersave` |
-| `autoBatteryMode` | bool | `true` | Auto switch to powersave on battery |
-| `enforceMemoryLimits` | bool | `true` | Enforce memory limits |
-| `maxMemoryMb` | int | `300` | Max memory usage (MB) |
-| `cpuThreshold` | float | `80.0` | CPU threshold (%) |
+| Option                | Type  | Default      | Description                                  |
+| --------------------- | ----- | ------------ | -------------------------------------------- |
+| `enableVideo`         | bool  | `true`       | Enable video support                         |
+| `videoMuted`          | bool  | `true`       | Mute video audio                             |
+| `videoLoop`           | bool  | `true`       | Loop videos                                  |
+| `maxFps`              | int   | `60`         | Maximum FPS                                  |
+| `cacheLimitMb`        | int   | `500`        | Cache size limit (MB)                        |
+| `preloadNext`         | bool  | `true`       | Preload next wallpaper                       |
+| `performanceMode`     | enum  | `"balanced"` | Mode: `performance`, `balanced`, `powersave` |
+| `autoBatteryMode`     | bool  | `true`       | Auto switch to powersave on battery          |
+| `enforceMemoryLimits` | bool  | `true`       | Enforce memory limits                        |
+| `maxMemoryMb`         | int   | `300`        | Max memory usage (MB)                        |
+| `cpuThreshold`        | float | `80.0`       | CPU threshold (%)                            |
 
 ## Tips
 
@@ -475,7 +476,7 @@ You can combine multiple configuration methods:
     settings = {
       # Base configuration
       general.defaultTransition = "fade";
-      
+
       # Override with schedule during work hours
       schedule = [
         {
@@ -485,7 +486,7 @@ You can combine multiple configuration methods:
           wallpaper = "~/work-wallpaper.jpg";
         }
       ];
-      
+
       # Use playlist outside work hours
       playlist = {
         enabled = true;
@@ -501,6 +502,7 @@ You can combine multiple configuration methods:
 After changing configuration:
 
 **For NixOS system module:**
+
 ```bash
 # Rebuild NixOS
 sudo nixos-rebuild switch
@@ -513,6 +515,7 @@ journalctl --user -u momoi -f
 ```
 
 **For Home Manager:**
+
 ```bash
 # Rebuild Home Manager
 home-manager switch
@@ -543,6 +546,9 @@ Add to your Home Manager flake:
   outputs = { nixpkgs, home-manager, momoi, ... }: {
     homeConfigurations."youruser" = home-manager.lib.homeManagerConfiguration {
       pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      extraSpecialArgs = {
+        momoiFlake = momoi;  # Pass momoi flake to modules
+      };
       modules = [
         momoi.homeManagerModules.default
         ./home.nix
@@ -558,19 +564,19 @@ Add to your Home Manager flake:
 {
   services.momoi = {
     enable = true;
-    
+
     settings = {
       general = {
         logLevel = "info";
         defaultTransition = "fade";
       };
-      
+
       playlist = {
         enabled = true;
         interval = 300;
         sources = [ "~/Pictures/Wallpapers" ];
       };
-      
+
       shaderPresets = [
         {
           name = "evening";
@@ -587,12 +593,14 @@ Add to your Home Manager flake:
 ### Differences from NixOS Module
 
 **Home Manager module:**
+
 - Config file placed in `~/.config/momoi/config.toml` (user-specific)
 - Service runs per-user
 - Package installed per-user
 - Ideal for multi-user systems or non-NixOS with Nix + Home Manager
 
 **NixOS module:**
+
 - Config file in `/etc/momoi/config.toml` (system-wide)
 - Symlinked to each user's home directory
 - Package installed system-wide

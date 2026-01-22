@@ -74,6 +74,36 @@ wwctl set portrait.jpg --output DP-2
 wwctl query
 ```
 
+## Installation
+
+### NixOS Flakes (Easiest)
+
+Add momoi to your flake and use the autoload module:
+
+```nix
+{
+  inputs.momoi.url = "github:chikof/momoi";
+
+  outputs = { nixpkgs, momoi, ... }@inputs: {
+    nixosConfigurations.yourhost = nixpkgs.lib.nixosSystem {
+      specialArgs = { inherit inputs; };
+      modules = [
+        (momoi.nixosModules.autoload { inherit inputs; })
+        ./configuration.nix
+      ];
+    };
+  };
+}
+```
+
+Then enable in `configuration.nix`:
+
+```nix
+services.momoi.enable = true;
+```
+
+**See [INSTALLATION.md](./INSTALLATION.md) for more installation methods and Home Manager setup.**
+
 ### Configuration
 
 #### NixOS (Recommended)
