@@ -423,31 +423,6 @@ The project consists of three main components:
 - **client** (`wwctl`): CLI tool for controlling the daemon
 - **common**: Shared code and protocol definitions
 
-## Development
-
-See [ROADMAP.md](./ROADMAP.md) for the complete development plan.
-
-### Performance Optimizations
-
-The daemon includes several optimizations for smooth, efficient video playback:
-
-- **Multi-threaded Rendering**: Parallel frame processing for multiple monitors using Rayon
-- **Automatic FPS Detection**: Detects video framerate from GStreamer and adapts polling accordingly
-- **Adaptive Event Loop**: Dynamic sleep timing based on content type (1-16ms)
-- **Frame Change Detection**: Atomic flags prevent redundant rendering
-- **Buffer Reuse**: Shared memory buffers are reused between frames
-- **Zero-Copy Color Conversion**: Direct memory copy for BGRA format
-- **Smart Frame Dropping**: Graceful degradation under CPU load
-
-See [OPTIMIZATIONS.md](./OPTIMIZATIONS.md) for detailed performance metrics and analysis.
-
-**Typical Performance** (2560x1440 + 1080x1920 monitors, H.264 1080p video on both):
-
-- CPU Usage: 5-10% total (vs 25-40% unoptimized)
-- Frame Drop Rate: <0.1% per output
-- Memory: ~80MB stable (2 outputs)
-- Multi-monitor Speedup: 75% faster than sequential
-
 ### Development Shell
 
 ```bash
