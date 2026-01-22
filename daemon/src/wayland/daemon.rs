@@ -389,7 +389,8 @@ pub struct FrameUpdate {
 fn get_next_frame_delay(app_data: &WallpaperDaemon) -> std::time::Duration {
     use std::time::Duration;
 
-    let mut min_delay = Duration::from_millis(16); // Cap at ~60fps (16ms)
+    // Start with a high value, we'll find the minimum needed
+    let mut min_delay = Duration::from_millis(100);
 
     // Check for active transitions (need 60fps updates)
     for output_data in &app_data.outputs {
@@ -412,12 +413,10 @@ fn get_next_frame_delay(app_data: &WallpaperDaemon) -> std::time::Duration {
         }
     }
 
-    // Videos produce frames asynchronously, so we check more frequently
-    // but not too frequently to waste CPU
+    // Videos produce frames asynchronously, poll at their actual frame rate
     for output_data in &app_data.outputs {
         if let Some(video_manager) = &output_data.video_manager {
-            // Poll at the frame rate (not half) - GStreamer buffers frames for us
-            // This reduces CPU usage significantly while still being responsive
+            // Poll at the video's actual frame rate to avoid wasting CPU
             let video_poll_rate = video_manager.frame_duration();
             if video_poll_rate < min_delay {
                 min_delay = video_poll_rate;
@@ -427,8 +426,8 @@ fn get_next_frame_delay(app_data: &WallpaperDaemon) -> std::time::Duration {
 
     // Clamp to reasonable bounds
     // Min: 1ms (don't busy wait)
-    // Max: 16ms (don't sleep too long for responsiveness)
-    min_delay.clamp(Duration::from_millis(1), Duration::from_millis(16))
+    // Max: 100ms (if nothing is animating, check infrequently)
+    min_delay.clamp(Duration::from_millis(1), Duration::from_millis(100))
 }
 
 fn check_playlist_rotation(
