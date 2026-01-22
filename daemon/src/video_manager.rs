@@ -87,9 +87,9 @@ impl VideoManager {
 
         // Configure appsink
         app_sink.set_property("emit-signals", true);
-        app_sink.set_property("sync", false); // Don't sync to clock for wallpapers
-        app_sink.set_property("max-buffers", 2u32); // Reduced to 2 to save memory (~30MB savings)
-        app_sink.set_property("drop", true); // Drop old frames if we can't keep up
+        app_sink.set_property("sync", true); // Sync to clock to avoid decoding too fast
+        app_sink.set_property("max-buffers", 1u32); // Only 1 buffer to minimize latency
+        app_sink.set_property("drop", false); // Don't drop frames in GStreamer (we handle it)
 
         let current_frame = Arc::new(Mutex::new(None));
         let current_frame_clone = Arc::clone(&current_frame);
