@@ -1,0 +1,252 @@
+# Wayland Wallpaper Daemon Configuration
+# Example configuration file demonstrating all features
+
+# ============================================================================
+# General Settings
+# ============================================================================
+[general]
+# Log level: trace, debug, info, warn, error
+log_level = "info"
+
+# Default transition for wallpaper changes
+default_transition = "fade"
+
+# Default transition duration in milliseconds
+default_duration = 500
+
+# Default scaling mode: center, fill, fit, stretch, tile
+default_scale = "fill"
+
+# ============================================================================
+# Playlist Settings
+# ============================================================================
+[playlist]
+# Enable automatic wallpaper rotation
+enabled = true
+
+# Rotation interval in seconds (how long each wallpaper is shown)
+interval = 300  # 5 minutes
+
+# Shuffle wallpapers randomly
+shuffle = true
+
+# Transition to use when rotating wallpapers
+transition = "random"
+transition_duration = 1000
+
+# Wallpaper sources (can be files or directories)
+sources = [
+    "/home/user/Wallpapers/favorites",
+    "/home/user/Pictures/wallpapers/*.jpg",
+    "/home/user/Pictures/wallpapers/*.png",
+]
+
+# File extensions to include when scanning directories
+extensions = ["jpg", "jpeg", "png", "webp", "gif", "mp4", "webm", "mkv"]
+
+# ============================================================================
+# Time-Based Wallpaper Switching
+# ============================================================================
+
+# Morning wallpapers (6:00 AM - 12:00 PM)
+[[schedule]]
+name = "Morning"
+start_time = "06:00"
+end_time = "12:00"
+wallpaper = "/home/user/Wallpapers/morning/sunrise.jpg"
+transition = "fade"
+duration = 2000
+
+# Afternoon wallpapers (12:00 PM - 6:00 PM)
+[[schedule]]
+name = "Afternoon"
+start_time = "12:00"
+end_time = "18:00"
+wallpaper = "/home/user/Wallpapers/afternoon/sunny.jpg"
+transition = "center"
+duration = 1500
+
+# Evening wallpapers (6:00 PM - 10:00 PM)
+[[schedule]]
+name = "Evening"
+start_time = "18:00"
+end_time = "22:00"
+wallpaper = "/home/user/Wallpapers/evening/sunset.jpg"
+transition = "wipe-left"
+duration = 1000
+
+# Night wallpapers (10:00 PM - 6:00 AM)
+[[schedule]]
+name = "Night"
+start_time = "22:00"
+end_time = "06:00"
+wallpaper = "/home/user/Wallpapers/night/stars.jpg"
+transition = "fade"
+duration = 3000
+
+# ============================================================================
+# Per-Output (Monitor) Configuration
+# ============================================================================
+
+# Primary monitor configuration
+[[output]]
+name = "DP-2"  # Output name (use 'wwctl list-outputs' to find yours)
+wallpaper = "/home/user/Wallpapers/landscape.jpg"
+scale = "fill"
+transition = "fade"
+duration = 500
+
+# Enable playlist for this output
+playlist = true
+playlist_sources = [
+    "/home/user/Wallpapers/primary/*.jpg",
+]
+
+# Secondary monitor configuration (portrait)
+[[output]]
+name = "DP-3"
+wallpaper = "/home/user/Wallpapers/portrait.jpg"
+scale = "fit"
+transition = "wipe-top"
+duration = 800
+
+# Use different playlist for secondary monitor
+playlist = true
+playlist_sources = [
+    "/home/user/Wallpapers/secondary/*.jpg",
+]
+
+# ============================================================================
+# Collections
+# ============================================================================
+
+# Named collections of wallpapers that can be activated together
+[[collection]]
+name = "Nature"
+description = "Beautiful nature wallpapers"
+wallpapers = [
+    "/home/user/Wallpapers/nature/forest.jpg",
+    "/home/user/Wallpapers/nature/mountain.jpg",
+    "/home/user/Wallpapers/nature/ocean.jpg",
+]
+
+[[collection]]
+name = "Space"
+description = "Space and astronomy"
+wallpapers = [
+    "/home/user/Wallpapers/space/galaxy.jpg",
+    "/home/user/Wallpapers/space/nebula.jpg",
+    "/home/user/Wallpapers/space/planet.jpg",
+]
+
+[[collection]]
+name = "Minimal"
+description = "Minimalist designs"
+wallpapers = [
+    "/home/user/Wallpapers/minimal/gradient.png",
+    "/home/user/Wallpapers/minimal/geometric.png",
+]
+
+# ============================================================================
+# Shader Presets
+# ============================================================================
+
+# Calming slow plasma for productivity
+[[shader_preset]]
+name = "calm-plasma"
+shader = "plasma"
+description = "Slow calming plasma for focus"
+speed = 0.3
+intensity = 0.6
+color1 = "2E3440"
+color2 = "3B4252"
+color3 = "4C566A"
+scale = 1.2
+
+# High-energy starfield
+[[shader_preset]]
+name = "hyperspace"
+shader = "starfield"
+description = "Fast-moving dense starfield"
+speed = 3.0
+count = 500
+color1 = "FFFFFF"
+intensity = 1.2
+
+# Classic Matrix rain
+[[shader_preset]]
+name = "matrix-classic"
+shader = "matrix"
+description = "Classic green Matrix rain"
+speed = 1.5
+color1 = "00FF00"
+count = 200
+scale = 1.5
+
+# Sunset gradient
+[[shader_preset]]
+name = "sunset"
+shader = "gradient"
+description = "Warm sunset colors"
+speed = 0.5
+color1 = "FF6B6B"
+color2 = "FFD93D"
+color3 = "FF8C42"
+scale = 1.0
+intensity = 0.9
+
+# Psychedelic tunnel
+[[shader_preset]]
+name = "vortex"
+shader = "tunnel"
+description = "Trippy tunnel effect"
+speed = 1.2
+color1 = "FF1493"
+color2 = "00CED1"
+color3 = "FFD700"
+count = 150
+intensity = 1.0
+
+# Oceanic waves
+[[shader_preset]]
+name = "ocean"
+shader = "waves"
+description = "Calming ocean waves"
+speed = 0.4
+color1 = "006994"
+color2 = "0080C0"
+color3 = "00B4D8"
+scale = 1.5
+intensity = 0.8
+
+# Dreamy raymarching scene
+[[shader_preset]]
+name = "dreamscape"
+shader = "raymarching"
+description = "Dreamy 3D scene"
+speed = 0.6
+color1 = "9B59B6"
+color2 = "E74C3C"
+color3 = "2C3E50"
+scale = 1.0
+intensity = 0.9
+
+# ============================================================================
+# Advanced Settings
+# ============================================================================
+[advanced]
+# Enable video wallpapers (requires video feature)
+enable_video = true
+
+# Video playback settings
+video_muted = true
+video_loop = true
+
+# Frame rate cap (0 = unlimited)
+max_fps = 60
+
+# Memory limit for cache in MB (0 = unlimited)
+cache_limit_mb = 500
+
+# Preload next wallpaper in playlist
+preload_next = true

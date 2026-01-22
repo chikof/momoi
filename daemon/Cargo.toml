@@ -1,0 +1,75 @@
+[package]
+name = "daemon"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+common = { workspace = true }
+
+# Wayland
+smithay-client-toolkit = { workspace = true }
+wayland-client = { workspace = true }
+wayland-protocols = { workspace = true }
+wayland-protocols-wlr = { workspace = true }
+
+# Image processing
+image = { workspace = true, features = [
+  "png",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "tiff",
+] }
+fast_image_resize = { workspace = true }
+resvg = { workspace = true }
+
+# Video (optional)
+gstreamer = { workspace = true, optional = true }
+gstreamer-video = { workspace = true, optional = true }
+gstreamer-app = { workspace = true, optional = true }
+
+# Graphics (optional)
+wgpu = { workspace = true, optional = true }
+pollster = { version = "0.4", optional = true }
+futures = { version = "0.3", optional = true }
+bytemuck = { version = "1.14", features = ["derive"], optional = true }
+
+# Async
+tokio = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = "0.9.11+spec-1.1.0"
+
+# Utilities
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+memmap2 = "0.9"
+tempfile = "3.8"
+rayon = { workspace = true }
+rand = "0.9.2"
+glob = "0.3"
+chrono = "0.4"
+dirs = "6.0"
+shellexpand = "3.1"
+sysinfo = "0.37.2"
+
+[features]
+default = []
+video = ["gstreamer", "gstreamer-video", "gstreamer-app"]
+gpu = ["wgpu", "pollster", "futures", "bytemuck"]
+all = ["video", "gpu"]
+
+[[bin]]
+name = "momoi"
+path = "src/main.rs"

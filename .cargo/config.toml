@@ -1,0 +1,8 @@
+# Cargo configuration for momoi
+
+# Workaround for Rust 1.92.0 lld linker bug
+# Override the Nix environment's lld setting to use GNU ld
+
+[target.x86_64-unknown-linux-gnu]
+linker = "cc"
+rustflags = ["-C", "link-arg=-fuse-ld=bfd"]
