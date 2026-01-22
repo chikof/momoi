@@ -67,6 +67,10 @@
             ffmpeg
             gst_all_1.gstreamer
             gst_all_1.gst-plugins-base
+            gst_all_1.gst-plugins-good
+            gst_all_1.gst-plugins-bad
+            gst_all_1.gst-plugins-ugly
+            gst_all_1.gst-libav
           ];
 
         in
@@ -87,10 +91,23 @@
               # Build with all features
               buildFeatures = [ "all" ];
 
-              # Add runtime library paths
+              # Add runtime library paths and GStreamer plugin paths
               postInstall = ''
                 wrapProgram $out/bin/momoi \
-                  --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}"
+                  --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}" \
+                  --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${
+                    pkgs.lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" (
+                      with pkgs.gst_all_1;
+                      [
+                        gstreamer
+                        gst-plugins-base
+                        gst-plugins-good
+                        gst-plugins-bad
+                        gst-plugins-ugly
+                        gst-libav
+                      ]
+                    )
+                  }"
               '';
 
               meta = with pkgs.lib; {
@@ -131,7 +148,7 @@
             PKG_CONFIG_PATH = "${pkgs.lib.makeSearchPath "lib/pkgconfig" buildInputs}";
 
             shellHook = ''
-              echo "🎨 Momoi - Wayland Wallpaper Daemon"
+              echo "Momoi - Wayland Wallpaper Daemon"
               echo "===================================="
               echo "Rust version: $(rustc --version)"
               echo "Cargo version: $(cargo --version)"
