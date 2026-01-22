@@ -61,12 +61,14 @@ Unacceptable behavior will not be tolerated. Report issues to the project mainta
 ### Setup Steps
 
 1. **Clone the repository**:
+
    ```bash
    git clone https://github.com/chikof/momoi.git
    cd momoi
    ```
 
 2. **Enter the development environment**:
+
    ```bash
    nix develop
    # Or if using direnv:
@@ -74,11 +76,13 @@ Unacceptable behavior will not be tolerated. Report issues to the project mainta
    ```
 
 3. **Build the project**:
+
    ```bash
    cargo build --all-features
    ```
 
 4. **Run tests**:
+
    ```bash
    cargo test --all
    ```
@@ -95,6 +99,7 @@ Unacceptable behavior will not be tolerated. Report issues to the project mainta
 ### Workflow
 
 1. **Create a branch** from `main`:
+
    ```bash
    git checkout -b feature/your-feature-name
    # or
@@ -108,6 +113,7 @@ Unacceptable behavior will not be tolerated. Report issues to the project mainta
    - Update documentation as needed
 
 3. **Test your changes**:
+
    ```bash
    cargo test --all
    cargo clippy --all-features
@@ -133,6 +139,7 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 ```
 
 **Types**:
+
 - `feat`: New feature
 - `fix`: Bug fix
 - `docs`: Documentation changes
@@ -142,6 +149,7 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 - `chore`: Maintenance tasks
 
 **Examples**:
+
 ```
 feat(gpu): add support for custom shader parameters
 fix(ipc): resolve connection timeout on slow systems
@@ -178,6 +186,7 @@ RUST_LOG=debug cargo test -- --nocapture
 - **Test naming**: Use descriptive names like `test_shader_params_validation`
 
 **Example unit test**:
+
 ```rust
 #[cfg(test)]
 mod tests {
@@ -209,6 +218,7 @@ For features requiring runtime testing:
 ### Pull Request Process
 
 1. **Push your branch**:
+
    ```bash
    git push origin feature/your-feature-name
    ```
@@ -297,7 +307,8 @@ Fixes #123
 - **Safety**: Document `unsafe` code thoroughly
 
 **Example**:
-```rust
+
+````rust
 /// Parses a hex color string to RGB float values.
 ///
 /// # Arguments
@@ -319,7 +330,7 @@ Fixes #123
 pub fn parse_color(hex: &str) -> Option<(f32, f32, f32)> {
     // Implementation
 }
-```
+````
 
 ### Performance
 
@@ -350,10 +361,6 @@ pub fn parse_color(hex: &str) -> Option<(f32, f32, f32)> {
    - CONFIGURATION.md - Configuration guide
    - TROUBLESHOOTING.md - Common issues
    - TESTING.md - Testing guide
-
-3. **Architecture documentation**
-   - ARCHITECTURE.md - System design
-   - ROADMAP.md - Project roadmap
 
 ### Documentation Guidelines
 
