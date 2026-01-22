@@ -235,7 +235,7 @@ impl Dispatch<wl_buffer::WlBuffer, std::sync::Arc<std::sync::Mutex<crate::buffer
                 // Compositor is done with this buffer, mark it as available for reuse
                 if let Ok(mut state) = data.lock() {
                     state.busy = false;
-                    log::trace!("Buffer released by compositor");
+                    log::debug!("Buffer released by compositor");
                 }
             }
             _ => {}

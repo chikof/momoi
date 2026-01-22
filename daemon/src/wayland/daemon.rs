@@ -357,20 +357,42 @@ impl OutputData {
     }
 
     /// Clean up released buffers from the pool
-    /// Keep at most 2-3 buffers to avoid unbounded memory growth
+    /// Keep at most MAX_POOL_SIZE buffers to avoid unbounded memory growth
     pub(super) fn cleanup_buffer_pool(&mut self) {
         const MAX_POOL_SIZE: usize = 3;
 
-        // Remove released buffers if pool is too large
-        if self.buffer_pool.len() > MAX_POOL_SIZE {
-            let initial_size = self.buffer_pool.len();
-            self.buffer_pool.retain(|buf| !buf.is_released());
+        let initial_size = self.buffer_pool.len();
+        
+        if initial_size > MAX_POOL_SIZE {
+            // Sort: released buffers first (they can be removed safely)
+            // Then remove excess buffers starting with released ones
+            let mut to_remove = initial_size - MAX_POOL_SIZE;
+            
+            self.buffer_pool.retain(|buf| {
+                if to_remove > 0 && buf.is_released() {
+                    to_remove -= 1;
+                    false // Remove this buffer
+                } else {
+                    true // Keep this buffer
+                }
+            });
+            
             let removed = initial_size - self.buffer_pool.len();
             if removed > 0 {
                 log::debug!(
-                    "Cleaned up {} released buffer(s) from pool (pool size: {})",
+                    "Cleaned up {} released buffer(s) from pool (pool size: {} -> {})",
                     removed,
+                    initial_size,
                     self.buffer_pool.len()
+                );
+            }
+            
+            // Warn if we still have too many (means they're all busy, possible leak)
+            if self.buffer_pool.len() > MAX_POOL_SIZE {
+                log::warn!(
+                    "Buffer pool has {} busy buffers (max: {}), compositor may not be releasing buffers!",
+                    self.buffer_pool.len(),
+                    MAX_POOL_SIZE
                 );
             }
         }
@@ -567,6 +589,21 @@ fn check_resources(app_data: &mut WallpaperDaemon) -> Result<()> {
     if let Ok(mut state) = app_data.state.try_lock() {
         state.resource_stats = Some(stats);
         state.performance_mode = format!("{:?}", mode);
+    }
+
+    // Log buffer pool statistics to monitor for memory leaks
+    for (idx, output) in app_data.outputs.iter().enumerate() {
+        if output.buffer_pool.len() > 0 {
+            let busy_count = output.buffer_pool.iter().filter(|b| !b.is_released()).count();
+            let released_count = output.buffer_pool.len() - busy_count;
+            log::debug!(
+                "Output {}: buffer pool size = {} (busy: {}, released: {})",
+                idx,
+                output.buffer_pool.len(),
+                busy_count,
+                released_count
+            );
+        }
     }
 
     // Note: Performance mode changes are logged in resource_monitor.update()
