@@ -245,7 +245,12 @@ fn set_image_wallpaper(
             layer_surface.wl_surface().commit();
         }
 
-        output_data.buffer = Some(buffer);
+        // Mark buffer as busy (compositor is using it)
+        buffer.mark_busy();
+
+        // Swap buffer (moves old buffer to pool)
+        output_data.swap_buffer(buffer);
+        output_data.cleanup_buffer_pool();
 
         log::info!("Applied wallpaper to output {}x{}", width, height);
     }
@@ -354,7 +359,13 @@ fn set_animated_gif(
             layer_surface.wl_surface().commit();
         }
 
-        output_data.buffer = Some(buffer);
+        // Mark buffer as busy (compositor is using it)
+        buffer.mark_busy();
+
+        // Swap buffer (moves old buffer to pool)
+        output_data.swap_buffer(buffer);
+        output_data.cleanup_buffer_pool();
+
         output_data.gif_manager = Some(gif_manager);
 
         log::info!("Applied animated GIF to output {}x{}", width, height);
@@ -446,7 +457,12 @@ fn set_color_wallpaper(
             layer_surface.wl_surface().commit();
         }
 
-        output_data.buffer = Some(buffer);
+        // Mark buffer as busy (compositor is using it)
+        buffer.mark_busy();
+
+        // Swap buffer (moves old buffer to pool)
+        output_data.swap_buffer(buffer);
+        output_data.cleanup_buffer_pool();
 
         log::info!("Applied color to output {}x{}", width, height);
     }

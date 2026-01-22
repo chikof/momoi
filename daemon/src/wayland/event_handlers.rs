@@ -185,7 +185,13 @@ impl LayerShellHandler for WallpaperDaemon {
                         layer.wl_surface().attach(Some(buffer.buffer()), 0, 0);
                         layer.wl_surface().commit();
 
-                        output_data.buffer = Some(buffer);
+                        // Mark buffer as busy (compositor is using it)
+                        buffer.mark_busy();
+
+                        // Swap buffer (moves old buffer to pool)
+                        output_data.swap_buffer(buffer);
+                        output_data.cleanup_buffer_pool();
+
                         log::info!("Rendered default color to output");
                     }
                     Err(e) => {
@@ -214,17 +220,26 @@ impl ShmHandler for WallpaperDaemon {
     }
 }
 
-// Implement Dispatch for wl_buffer (no-op, we don't handle buffer events)
-impl Dispatch<wl_buffer::WlBuffer, ()> for WallpaperDaemon {
+// Implement Dispatch for wl_buffer to handle release events
+impl Dispatch<wl_buffer::WlBuffer, std::sync::Arc<std::sync::Mutex<crate::buffer::BufferState>>> for WallpaperDaemon {
     fn event(
         _state: &mut Self,
         _proxy: &wl_buffer::WlBuffer,
-        _event: <wl_buffer::WlBuffer as wayland_client::Proxy>::Event,
-        _data: &(),
+        event: <wl_buffer::WlBuffer as wayland_client::Proxy>::Event,
+        data: &std::sync::Arc<std::sync::Mutex<crate::buffer::BufferState>>,
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
-        // No buffer events to handle
+        match event {
+            wayland_client::protocol::wl_buffer::Event::Release => {
+                // Compositor is done with this buffer, mark it as available for reuse
+                if let Ok(mut state) = data.lock() {
+                    state.busy = false;
+                    log::trace!("Buffer released by compositor");
+                }
+            }
+            _ => {}
+        }
     }
 }
 

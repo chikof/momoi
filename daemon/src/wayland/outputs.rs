@@ -135,6 +135,7 @@ pub(super) fn create_layer_surface(
         output,
         layer_surface: Some(layer_surface),
         buffer: None,
+        buffer_pool: Vec::new(),
         width: 0,
         height: 0,
         scale: 1.0,

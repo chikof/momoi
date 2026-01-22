@@ -1,6 +1,20 @@
 use std::os::fd::AsFd;
+use std::sync::{Arc, Mutex};
 use wayland_client::protocol::{wl_buffer, wl_shm, wl_shm_pool};
 use wayland_client::{Dispatch, QueueHandle};
+
+/// Buffer state tracked by Wayland compositor
+#[derive(Debug, Clone)]
+pub struct BufferState {
+    /// Whether the buffer is currently in use by the compositor
+    pub busy: bool,
+}
+
+impl BufferState {
+    pub fn new() -> Self {
+        Self { busy: true }
+    }
+}
 
 /// Helper for creating and managing shared memory buffers for Wayland
 pub struct ShmBuffer {
@@ -9,6 +23,8 @@ pub struct ShmBuffer {
     mmap: memmap2::MmapMut,
     width: u32,
     height: u32,
+    /// Shared state for tracking buffer usage
+    pub state: Arc<Mutex<BufferState>>,
 }
 
 impl ShmBuffer {
@@ -19,7 +35,7 @@ impl ShmBuffer {
         qh: &QueueHandle<D>,
     ) -> anyhow::Result<Self>
     where
-        D: Dispatch<wl_shm_pool::WlShmPool, ()> + Dispatch<wl_buffer::WlBuffer, ()> + 'static,
+        D: Dispatch<wl_shm_pool::WlShmPool, ()> + Dispatch<wl_buffer::WlBuffer, Arc<Mutex<BufferState>>> + 'static,
     {
         let stride = width * 4; // 4 bytes per pixel (ARGB8888)
         let size = stride * height;
@@ -34,7 +50,10 @@ impl ShmBuffer {
         // Create Wayland shm pool
         let pool = shm.create_pool(file.as_fd(), size as i32, qh, ());
 
-        // Create buffer from pool
+        // Create shared state for tracking buffer usage
+        let state = Arc::new(Mutex::new(BufferState::new()));
+
+        // Create buffer from pool with state as user data
         let buffer = pool.create_buffer(
             0,
             width as i32,
@@ -42,7 +61,7 @@ impl ShmBuffer {
             stride as i32,
             wl_shm::Format::Argb8888,
             qh,
-            (),
+            state.clone(),
         );
 
         Ok(Self {
@@ -51,7 +70,20 @@ impl ShmBuffer {
             mmap,
             width,
             height,
+            state,
         })
+    }
+    
+    /// Check if the buffer is safe to reuse (not busy)
+    pub fn is_released(&self) -> bool {
+        self.state.lock().map(|s| !s.busy).unwrap_or(false)
+    }
+    
+    /// Mark buffer as busy (attached to surface)
+    pub fn mark_busy(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.busy = true;
+        }
     }
 
     pub fn fill_color(&mut self, r: u8, g: u8, b: u8, a: u8) {

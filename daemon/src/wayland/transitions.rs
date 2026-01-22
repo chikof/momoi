@@ -40,29 +40,11 @@ pub(super) fn update_transitions(
                 );
 
                 // Update buffer with final wallpaper
-                if let Some(buffer) = &mut output_data.buffer {
-                    if let Err(e) = buffer.write_image_data(&final_data) {
-                        log::warn!("Failed to write final wallpaper after transition: {}", e);
-                        let mut new_buffer = crate::buffer::ShmBuffer::new(
-                            app_data.shm.wl_shm(),
-                            width,
-                            height,
-                            qh,
-                        )?;
-                        new_buffer.write_image_data(&final_data)?;
-                        output_data.buffer = Some(new_buffer);
-                    }
-                } else {
-                    let mut buffer =
-                        crate::buffer::ShmBuffer::new(app_data.shm.wl_shm(), width, height, qh)?;
-                    buffer.write_image_data(&final_data)?;
-                    output_data.buffer = Some(buffer);
-                }
+                let mut buffer = output_data.get_buffer(&app_data.shm, width, height, qh)?;
+                buffer.write_image_data(&final_data)?;
 
                 // Commit to Wayland
-                if let Some(layer_surface) = &output_data.layer_surface
-                    && let Some(buffer) = &output_data.buffer
-                {
+                if let Some(layer_surface) = &output_data.layer_surface {
                     layer_surface
                         .wl_surface()
                         .attach(Some(buffer.buffer()), 0, 0);
@@ -71,6 +53,13 @@ pub(super) fn update_transitions(
                         .damage_buffer(0, 0, width as i32, height as i32);
                     layer_surface.wl_surface().commit();
                 }
+
+                // Mark buffer as busy (compositor is using it)
+                buffer.mark_busy();
+
+                // Swap buffer (moves old buffer to pool)
+                output_data.swap_buffer(buffer);
+                output_data.cleanup_buffer_pool();
             }
 
             // Clear transition state
@@ -94,25 +83,11 @@ pub(super) fn update_transitions(
         let height = output_data.height;
 
         // Create/update buffer with blended frame
-        if let Some(buffer) = &mut output_data.buffer {
-            if let Err(e) = buffer.write_image_data(&blended_frame) {
-                log::warn!("Failed to reuse buffer during transition: {}", e);
-                let mut new_buffer =
-                    crate::buffer::ShmBuffer::new(app_data.shm.wl_shm(), width, height, qh)?;
-                new_buffer.write_image_data(&blended_frame)?;
-                output_data.buffer = Some(new_buffer);
-            }
-        } else {
-            let mut buffer =
-                crate::buffer::ShmBuffer::new(app_data.shm.wl_shm(), width, height, qh)?;
-            buffer.write_image_data(&blended_frame)?;
-            output_data.buffer = Some(buffer);
-        }
+        let mut buffer = output_data.get_buffer(&app_data.shm, width, height, qh)?;
+        buffer.write_image_data(&blended_frame)?;
 
         // Attach and commit
-        if let Some(layer_surface) = &output_data.layer_surface
-            && let Some(buffer) = &output_data.buffer
-        {
+        if let Some(layer_surface) = &output_data.layer_surface {
             layer_surface
                 .wl_surface()
                 .attach(Some(buffer.buffer()), 0, 0);
@@ -121,6 +96,13 @@ pub(super) fn update_transitions(
                 .damage_buffer(0, 0, width as i32, height as i32);
             layer_surface.wl_surface().commit();
         }
+
+        // Mark buffer as busy (compositor is using it)
+        buffer.mark_busy();
+
+        // Swap buffer (moves old buffer to pool)
+        output_data.swap_buffer(buffer);
+        output_data.cleanup_buffer_pool();
     }
 
     Ok(())

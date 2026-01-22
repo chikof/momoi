@@ -82,7 +82,13 @@ pub(super) fn update_gif_frames(
             layer_surface.wl_surface().commit();
         }
 
-        output_data.buffer = Some(buffer);
+        // Mark buffer as busy (compositor is using it)
+        buffer.mark_busy();
+
+        // Swap buffer (moves old buffer to pool)
+        output_data.swap_buffer(buffer);
+        output_data.cleanup_buffer_pool();
+
         buffers_updated += 1;
     }
 
@@ -168,37 +174,12 @@ pub(super) fn update_video_frames(
             "video frame"
         );
 
-        // Reuse existing buffer if possible, otherwise create new one
-        if let Some(buffer) = &mut output_data.buffer {
-            // Reuse existing buffer (just update data)
-            if let Err(e) = buffer.write_image_data(&final_data) {
-                log::warn!("Failed to reuse buffer, creating new one: {}", e);
-                // Create new buffer as fallback
-                let mut new_buffer = crate::buffer::ShmBuffer::new(
-                    app_data.shm.wl_shm(),
-                    update.width,
-                    update.height,
-                    qh,
-                )?;
-                new_buffer.write_image_data(&final_data)?;
-                output_data.buffer = Some(new_buffer);
-            }
-        } else {
-            // No existing buffer, create new one
-            let mut buffer = crate::buffer::ShmBuffer::new(
-                app_data.shm.wl_shm(),
-                update.width,
-                update.height,
-                qh,
-            )?;
-            buffer.write_image_data(&final_data)?;
-            output_data.buffer = Some(buffer);
-        }
+        // Get or create a buffer (will reuse from pool if available)
+        let mut buffer = output_data.get_buffer(&app_data.shm, update.width, update.height, qh)?;
+        buffer.write_image_data(&final_data)?;
 
         // Attach and commit
-        if let Some(layer_surface) = &output_data.layer_surface
-            && let Some(buffer) = &output_data.buffer
-        {
+        if let Some(layer_surface) = &output_data.layer_surface {
             layer_surface
                 .wl_surface()
                 .attach(Some(buffer.buffer()), 0, 0);
@@ -210,6 +191,13 @@ pub(super) fn update_video_frames(
             );
             layer_surface.wl_surface().commit();
         }
+
+        // Mark buffer as busy (compositor is using it)
+        buffer.mark_busy();
+
+        // Swap buffer (moves old buffer to pool)
+        output_data.swap_buffer(buffer);
+        output_data.cleanup_buffer_pool();
 
         buffers_updated += 1;
     }
@@ -276,23 +264,12 @@ pub(super) fn update_shader_frames(
             "shader frame"
         );
 
-        // Update buffer
-        if let Some(buffer) = &mut output_data.buffer {
-            if let Err(e) = buffer.write_image_data(&frame_data) {
-                log::warn!("Failed to update shader buffer: {}", e);
-                continue;
-            }
-        } else {
-            let mut buffer =
-                crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
-            buffer.write_image_data(&frame_data)?;
-            output_data.buffer = Some(buffer);
-        }
+        // Get or create a buffer (will reuse from pool if available)
+        let mut buffer = output_data.get_buffer(&app_data.shm, width, height, qh)?;
+        buffer.write_image_data(&frame_data)?;
 
         // Commit to Wayland
-        if let Some(layer_surface) = &output_data.layer_surface
-            && let Some(buffer) = &output_data.buffer
-        {
+        if let Some(layer_surface) = &output_data.layer_surface {
             layer_surface
                 .wl_surface()
                 .attach(Some(buffer.buffer()), 0, 0);
@@ -301,6 +278,13 @@ pub(super) fn update_shader_frames(
                 .damage_buffer(0, 0, width as i32, height as i32);
             layer_surface.wl_surface().commit();
         }
+
+        // Mark buffer as busy (compositor is using it)
+        buffer.mark_busy();
+
+        // Swap buffer (moves old buffer to pool)
+        output_data.swap_buffer(buffer);
+        output_data.cleanup_buffer_pool();
     }
 
     Ok(())

@@ -293,6 +293,8 @@ pub struct OutputData {
     pub(super) output: wl_output::WlOutput,
     pub(super) layer_surface: Option<smithay_client_toolkit::shell::wlr_layer::LayerSurface>,
     pub(super) buffer: Option<crate::buffer::ShmBuffer>,
+    /// Pool of old buffers waiting to be released by compositor
+    pub(super) buffer_pool: Vec<crate::buffer::ShmBuffer>,
     pub(super) width: u32,
     pub(super) height: u32,
     pub(super) scale: f64,
@@ -308,6 +310,71 @@ pub struct OutputData {
     /// GPU renderer for accelerated rendering (optional)
     #[cfg(feature = "gpu")]
     pub(super) gpu_renderer: Option<std::sync::Arc<crate::gpu::GpuRenderer>>,
+}
+
+impl OutputData {
+    /// Get a buffer from the pool if available and released, or create a new one
+    pub(super) fn get_buffer(
+        &mut self,
+        shm: &Shm,
+        width: u32,
+        height: u32,
+        qh: &QueueHandle<WallpaperDaemon>,
+    ) -> Result<crate::buffer::ShmBuffer> {
+        // Try to find a released buffer with matching dimensions
+        if let Some(index) = self
+            .buffer_pool
+            .iter()
+            .position(|buf| buf.width() == width && buf.height() == height && buf.is_released())
+        {
+            let buffer = self.buffer_pool.swap_remove(index);
+            log::debug!(
+                "Reusing buffer from pool ({}x{}, pool size: {})",
+                width,
+                height,
+                self.buffer_pool.len()
+            );
+            return Ok(buffer);
+        }
+
+        // No suitable buffer found, create a new one
+        log::debug!("Creating new buffer ({}x{})", width, height);
+        crate::buffer::ShmBuffer::new(shm.wl_shm(), width, height, qh)
+    }
+
+    /// Move the current buffer to the pool before replacing it
+    pub(super) fn swap_buffer(&mut self, new_buffer: crate::buffer::ShmBuffer) {
+        if let Some(old_buffer) = self.buffer.take() {
+            // Mark the buffer as busy (compositor is still using it)
+            // Don't mark as busy here - it's already marked when we called attach()
+            self.buffer_pool.push(old_buffer);
+            log::debug!(
+                "Moved old buffer to pool (pool size: {})",
+                self.buffer_pool.len()
+            );
+        }
+        self.buffer = Some(new_buffer);
+    }
+
+    /// Clean up released buffers from the pool
+    /// Keep at most 2-3 buffers to avoid unbounded memory growth
+    pub(super) fn cleanup_buffer_pool(&mut self) {
+        const MAX_POOL_SIZE: usize = 3;
+
+        // Remove released buffers if pool is too large
+        if self.buffer_pool.len() > MAX_POOL_SIZE {
+            let initial_size = self.buffer_pool.len();
+            self.buffer_pool.retain(|buf| !buf.is_released());
+            let removed = initial_size - self.buffer_pool.len();
+            if removed > 0 {
+                log::debug!(
+                    "Cleaned up {} released buffer(s) from pool (pool size: {})",
+                    removed,
+                    self.buffer_pool.len()
+                );
+            }
+        }
+    }
 }
 
 /// Frame data ready for rendering (computed in parallel)
