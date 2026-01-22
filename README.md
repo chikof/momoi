@@ -76,6 +76,111 @@ wwctl query
 
 ### Configuration
 
+#### NixOS (Recommended)
+
+Configure Momoi declaratively using Nix language:
+
+```nix
+{
+  services.momoi = {
+    enable = true;
+
+    settings = {
+      general = {
+        logLevel = "info";
+        defaultTransition = "fade";
+        defaultDuration = 500;
+      };
+
+      # Playlist mode with auto-rotation
+      playlist = {
+        enabled = true;
+        interval = 300;  # 5 minutes
+        shuffle = true;
+        sources = [
+          "~/Pictures/Wallpapers"
+          "~/wallpapers/*.jpg"
+        ];
+      };
+
+      # Time-based scheduling
+      schedule = [
+        {
+          name = "Morning";
+          startTime = "07:00";
+          endTime = "12:00";
+          wallpaper = "~/wallpapers/morning.jpg";
+        }
+        {
+          name = "Evening";
+          startTime = "18:00";
+          endTime = "23:00";
+          wallpaper = "~/wallpapers/evening.jpg";
+        }
+      ];
+
+      # Per-monitor configuration
+      outputs = [
+        {
+          name = "DP-1";
+          wallpaper = "~/wallpapers/landscape.jpg";
+          scale = "fill";
+        }
+        {
+          name = "DP-2";
+          wallpaper = "~/wallpapers/portrait.jpg";
+          scale = "fit";
+        }
+      ];
+
+      # Shader presets
+      shaderPresets = [
+        {
+          name = "calm-ocean";
+          shader = "waves";
+          speed = 0.5;
+          color1 = "1a1a2e";
+          color2 = "16213e";
+        }
+        {
+          name = "matrix-green";
+          shader = "matrix";
+          speed = 1.5;
+          color1 = "00FF00";
+          count = 200;
+        }
+      ];
+
+      # Performance settings
+      advanced = {
+        performanceMode = "balanced";
+        autoBatteryMode = true;
+        maxFps = 60;
+      };
+    };
+  };
+}
+```
+
+**Flake setup:**
+
+```nix
+{
+  inputs.momoi.url = "github:chikof/momoi";
+
+  outputs = { self, nixpkgs, momoi, ... }: {
+    nixosConfigurations.yourhost = nixpkgs.lib.nixosSystem {
+      modules = [
+        momoi.nixosModules.default
+        ./configuration.nix
+      ];
+    };
+  };
+}
+```
+
+#### Manual Configuration (TOML)
+
 Create a config file for advanced features:
 
 ```bash
@@ -103,11 +208,12 @@ speed = 0.5
 color1 = "1a1a2e"
 ```
 
-See [CONFIGURATION.md](./CONFIGURATION.md) for complete documentation.
+See [NIXOS_CONFIGURATION.md](./NIXOS_CONFIGURATION.md) for complete NixOS guide, or [CONFIGURATION.md](./CONFIGURATION.md) for TOML reference.
 
 ## 📖 Documentation
 
-- [CONFIGURATION.md](./CONFIGURATION.md) - Complete configuration guide
+- [NIXOS_CONFIGURATION.md](./NIXOS_CONFIGURATION.md) - NixOS declarative configuration guide
+- [CONFIGURATION.md](./CONFIGURATION.md) - TOML configuration reference
 - [CONTRIBUTING.md](./CONTRIBUTING.md) - Contribution guidelines
 
 ## ⚙️ Contributing
