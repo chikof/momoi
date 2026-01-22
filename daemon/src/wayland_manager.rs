@@ -1094,7 +1094,20 @@ impl WallpaperDaemon {
             let overlay_mgr = crate::overlay_shader::OverlayManager::new(overlay);
             output_data.overlay_manager = Some(overlay_mgr);
 
-            log::info!("Applied overlay '{}' to output", overlay_name);
+            // Get output name for logging
+            let output_name = if let Some(info) = self.output_state.info(&output_data.output) {
+                info.name.clone().unwrap_or_else(|| "unknown".to_string())
+            } else {
+                "unknown".to_string()
+            };
+
+            log::info!(
+                "Applied overlay '{}' to output '{}' ({}x{})",
+                overlay_name,
+                output_name,
+                output_data.width,
+                output_data.height
+            );
         }
 
         Ok(())
@@ -1137,9 +1150,19 @@ impl WallpaperDaemon {
         height: u32,
     ) -> Result<()> {
         if let Some(overlay_mgr) = &mut output_data.overlay_manager {
+            log::debug!(
+                "Applying overlay '{}' to video frame {}x{} (buffer size: {} bytes)",
+                overlay_mgr.overlay().name(),
+                width,
+                height,
+                frame_data.len()
+            );
             // For now, always use CPU overlay to avoid frame drops
             // TODO: Re-enable GPU overlays when we have full GPU pipeline
             overlay_mgr.apply_overlay(frame_data, width, height)?;
+            log::debug!("Overlay applied successfully");
+        } else {
+            log::trace!("No overlay manager present for this output");
         }
         Ok(())
     }
@@ -1153,7 +1176,17 @@ impl WallpaperDaemon {
         height: u32,
     ) -> Result<()> {
         if let Some(overlay_mgr) = &mut output_data.overlay_manager {
+            log::debug!(
+                "Applying overlay '{}' (CPU-only) to frame {}x{} (buffer size: {} bytes)",
+                overlay_mgr.overlay().name(),
+                width,
+                height,
+                frame_data.len()
+            );
             overlay_mgr.apply_overlay(frame_data, width, height)?;
+            log::debug!("Overlay applied successfully (CPU-only)");
+        } else {
+            log::trace!("No overlay manager present for this output (CPU-only)");
         }
         Ok(())
     }

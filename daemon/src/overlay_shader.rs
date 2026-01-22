@@ -179,32 +179,66 @@ impl OverlayManager {
         self.frame += 1;
         let time = self.time.elapsed().as_secs_f32();
 
+        // Log first few frames to see parameters
+        if self.frame <= 3 {
+            log::info!(
+                "Overlay frame #{}: {} ({}x{}, {} bytes) - time: {:.2}s",
+                self.frame,
+                self.overlay.name(),
+                width,
+                height,
+                buffer.len(),
+                time
+            );
+        }
+
         match self.overlay {
             OverlayShader::Vignette { strength } => {
+                if self.frame == 1 {
+                    log::info!("Vignette parameters: strength={}", strength);
+                }
                 self.apply_vignette(buffer, width, height, strength);
             }
             OverlayShader::Scanlines {
                 intensity,
                 line_width,
             } => {
+                if self.frame == 1 {
+                    log::info!("Scanlines parameters: intensity={}, line_width={}", intensity, line_width);
+                }
                 self.apply_scanlines(buffer, width, height, intensity, line_width);
             }
             OverlayShader::FilmGrain { intensity } => {
+                if self.frame == 1 {
+                    log::info!("FilmGrain parameters: intensity={}", intensity);
+                }
                 self.apply_film_grain(buffer, width, height, intensity, time);
             }
             OverlayShader::ChromaticAberration { offset } => {
+                if self.frame == 1 {
+                    log::info!("ChromaticAberration parameters: offset={}", offset);
+                }
                 self.apply_chromatic_aberration(buffer, width, height, offset);
             }
             OverlayShader::CRT {
                 curvature,
                 scanline_intensity,
             } => {
+                if self.frame == 1 {
+                    log::info!("CRT parameters: curvature={}, scanline_intensity={}", curvature, scanline_intensity);
+                }
                 self.apply_crt(buffer, width, height, curvature, scanline_intensity);
             }
             OverlayShader::Pixelate { pixel_size } => {
+                if self.frame == 1 {
+                    log::info!("Pixelate parameters: pixel_size={}", pixel_size);
+                }
                 self.apply_pixelate(buffer, width, height, pixel_size);
             }
             OverlayShader::ColorTint { r, g, b, strength } => {
+                if self.frame == 1 {
+                    log::info!("ColorTint parameters: r={}, g={}, b={}, strength={}", r, g, b, strength);
+                }
                 self.apply_color_tint(buffer, width, height, r, g, b, strength);
             }
         }
