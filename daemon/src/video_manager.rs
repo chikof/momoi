@@ -88,7 +88,7 @@ impl VideoManager {
         // Configure appsink
         app_sink.set_property("emit-signals", true);
         app_sink.set_property("sync", false); // Don't sync to clock for wallpapers
-        app_sink.set_property("max-buffers", 3u32); // Keep a few frames to avoid drops
+        app_sink.set_property("max-buffers", 2u32); // Reduced to 2 to save memory (~30MB savings)
         app_sink.set_property("drop", true); // Drop old frames if we can't keep up
 
         let current_frame = Arc::new(Mutex::new(None));
@@ -244,8 +244,8 @@ impl VideoManager {
             self.last_frame_time = Instant::now();
             self.frames_rendered += 1;
 
-            // Log statistics every 300 frames (~10 seconds at 30fps)
-            if self.frames_rendered % 300 == 0 {
+            // Log statistics every 600 frames (~20 seconds at 30fps, ~10 seconds at 60fps)
+            if self.frames_rendered % 600 == 0 {
                 let dropped = self
                     .frames_dropped
                     .load(std::sync::atomic::Ordering::Relaxed);
