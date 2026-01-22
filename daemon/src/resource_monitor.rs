@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::fs;
 use std::time::{Duration, Instant};
-use sysinfo::System;
+use sysinfo::{ProcessesToUpdate, System};
 
 /// Performance mode for resource management
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,8 +117,9 @@ impl ResourceMonitor {
     pub fn new(config: ResourceConfig) -> Self {
         let pid = sysinfo::Pid::from(std::process::id() as usize);
 
+        // Use System::new() instead of new_all() to avoid loading all processes
         ResourceMonitor {
-            system: System::new_all(),
+            system: System::new(),
             mode: PerformanceMode::default(),
             config,
             last_check: Instant::now(),
@@ -149,8 +150,10 @@ impl ResourceMonitor {
     pub fn update(&mut self) -> Result<ResourceStats> {
         self.last_check = Instant::now();
 
-        // Refresh system info
-        self.system.refresh_all();
+        // Refresh ONLY our process stats to avoid file descriptor leak
+        // refresh_all() opens /proc/*/stat for every process on the system
+        self.system
+            .refresh_processes(ProcessesToUpdate::Some(&[self.pid]), false);
 
         // Get our process stats
         let memory_bytes = self
