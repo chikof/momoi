@@ -3,7 +3,7 @@ use common::{Command, DaemonStatus, Response, WallpaperError, WallpaperStatus};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 use crate::{DaemonState, WallpaperCommand};
 

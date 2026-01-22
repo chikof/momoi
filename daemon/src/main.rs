@@ -17,7 +17,7 @@ mod gpu;
 
 use anyhow::Result;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -205,7 +205,7 @@ async fn main() -> Result<()> {
     // Set up signal handlers
     let signal_state = state.clone();
     tokio::spawn(async move {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
 
         let mut sigterm = signal(SignalKind::terminate()).expect("Failed to setup SIGTERM handler");
         let mut sigint = signal(SignalKind::interrupt()).expect("Failed to setup SIGINT handler");

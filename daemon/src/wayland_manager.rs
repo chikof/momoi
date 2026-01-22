@@ -7,21 +7,21 @@ use smithay_client_toolkit::{
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
     shell::{
+        WaylandSurface,
         wlr_layer::{
             Anchor, KeyboardInteractivity, Layer, LayerShell, LayerShellHandler, LayerSurface,
             LayerSurfaceConfigure,
         },
-        WaylandSurface,
     },
     shm::{Shm, ShmHandler},
 };
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{Mutex, mpsc};
 use wayland_client::{
+    Connection, Dispatch, Proxy, QueueHandle,
     globals::registry_queue_init,
     protocol::{wl_buffer, wl_shm_pool},
     protocol::{wl_output, wl_surface},
-    Connection, Dispatch, Proxy, QueueHandle,
 };
 
 use crate::wallpaper_manager::WallpaperManager;
@@ -34,11 +34,7 @@ pub async fn run(
     log::info!("Connecting to Wayland compositor...");
 
     // Run Wayland in a blocking task since it's synchronous
-    let result =
-        tokio::task::spawn_blocking(move || run_wayland_with_reconnect(state, wallpaper_rx))
-            .await?;
-
-    result
+    tokio::task::spawn_blocking(move || run_wayland_with_reconnect(state, wallpaper_rx)).await?
 }
 
 fn run_wayland_with_reconnect(
@@ -51,11 +47,11 @@ fn run_wayland_with_reconnect(
 
     loop {
         // Check if we should exit
-        if let Ok(guard) = state.try_lock() {
-            if guard.should_exit {
-                log::info!("Exit signal received, stopping reconnection attempts");
-                return Ok(());
-            }
+        if let Ok(guard) = state.try_lock()
+            && guard.should_exit
+        {
+            log::info!("Exit signal received, stopping reconnection attempts");
+            return Ok(());
         }
 
         match run_wayland_blocking(state.clone(), &mut wallpaper_rx) {
@@ -217,10 +213,10 @@ fn run_wayland_blocking(
         }
 
         // Check for wallpaper commands
-        if let Ok(cmd) = wallpaper_rx.try_recv() {
-            if let Err(e) = app_data.handle_wallpaper_command(cmd, &qh) {
-                log::error!("Failed to handle wallpaper command: {}", e);
-            }
+        if let Ok(cmd) = wallpaper_rx.try_recv()
+            && let Err(e) = app_data.handle_wallpaper_command(cmd, &qh)
+        {
+            log::error!("Failed to handle wallpaper command: {}", e);
         }
 
         // Update animated GIF frames
@@ -270,10 +266,10 @@ fn run_wayland_blocking(
         }
 
         // Check if we should exit (use try_lock to avoid blocking)
-        if let Ok(guard) = app_data.state.try_lock() {
-            if guard.should_exit {
-                app_data.exit = true;
-            }
+        if let Ok(guard) = app_data.state.try_lock()
+            && guard.should_exit
+        {
+            app_data.exit = true;
         }
 
         if app_data.exit {
@@ -547,14 +543,13 @@ impl WallpaperDaemon {
             }
 
             // Check if this output matches the filter
-            if let Some(filter) = output_filter {
-                if let Some(info) = self.output_state.info(&output_data.output) {
-                    if let Some(name) = &info.name {
-                        if name != filter && filter != "all" {
-                            continue;
-                        }
-                    }
-                }
+            if let Some(filter) = output_filter
+                && let Some(info) = self.output_state.info(&output_data.output)
+                && let Some(name) = &info.name
+                && name != filter
+                && filter != "all"
+            {
+                continue;
             }
 
             let width = output_data.width;
@@ -646,43 +641,39 @@ impl WallpaperDaemon {
             output_data.video_manager = None;
 
             // Handle transition if requested
-            if let Some(ref trans_config) = transition {
-                if trans_config.duration_ms() > 0 {
-                    // Capture current frame as "old frame" for transition
-                    if let Some(buffer) = &output_data.buffer {
-                        if let Ok(old_frame_data) = buffer.read_data() {
-                            // Start transition
-                            let transition_type =
-                                crate::transition::TransitionType::from(trans_config);
-                            let duration =
-                                std::time::Duration::from_millis(trans_config.duration_ms() as u64);
+            if let Some(ref trans_config) = transition
+                && trans_config.duration_ms() > 0
+                // Capture current frame as "old frame" for transition
+                && let Some(buffer) = &output_data.buffer
+                && let Ok(old_frame_data) = buffer.read_data()
+            {
+                // Start transition
+                let transition_type = crate::transition::TransitionType::from(trans_config);
+                let duration = std::time::Duration::from_millis(trans_config.duration_ms() as u64);
 
-                            output_data.transition = Some(crate::transition::Transition::new(
-                                transition_type,
-                                duration,
-                                old_frame_data,
-                                width,
-                                height,
-                                #[cfg(feature = "gpu")]
-                                output_data.gpu_renderer.clone(),
-                            ));
+                output_data.transition = Some(crate::transition::Transition::new(
+                    transition_type,
+                    duration,
+                    old_frame_data,
+                    width,
+                    height,
+                    #[cfg(feature = "gpu")]
+                    output_data.gpu_renderer.clone(),
+                ));
 
-                            // Store new wallpaper as pending
-                            output_data.pending_wallpaper_data = Some(argb_data);
+                // Store new wallpaper as pending
+                output_data.pending_wallpaper_data = Some(argb_data);
 
-                            log::info!(
-                                "Starting {:?} transition ({}ms) for output {}x{}",
-                                transition_type,
-                                trans_config.duration_ms(),
-                                width,
-                                height
-                            );
+                log::info!(
+                    "Starting {:?} transition ({}ms) for output {}x{}",
+                    transition_type,
+                    trans_config.duration_ms(),
+                    width,
+                    height
+                );
 
-                            // Don't update buffer yet - transition will handle it
-                            continue;
-                        }
-                    }
-                }
+                // Don't update buffer yet - transition will handle it
+                continue;
             }
 
             // No transition or transition setup failed - apply immediately
@@ -757,14 +748,13 @@ impl WallpaperDaemon {
             }
 
             // Check if this output matches the filter
-            if let Some(filter) = output_filter {
-                if let Some(info) = self.output_state.info(&output_data.output) {
-                    if let Some(name) = &info.name {
-                        if name != filter && filter != "all" {
-                            continue;
-                        }
-                    }
-                }
+            if let Some(filter) = output_filter
+                && let Some(info) = self.output_state.info(&output_data.output)
+                && let Some(name) = &info.name
+                && name != filter
+                && filter != "all"
+            {
+                continue;
             }
 
             let width = output_data.width;
@@ -875,14 +865,13 @@ impl WallpaperDaemon {
             }
 
             // Check if this output matches the filter
-            if let Some(filter) = output_filter {
-                if let Some(info) = self.output_state.info(&output_data.output) {
-                    if let Some(name) = &info.name {
-                        if name != filter && filter != "all" {
-                            continue;
-                        }
-                    }
-                }
+            if let Some(filter) = output_filter
+                && let Some(info) = self.output_state.info(&output_data.output)
+                && let Some(name) = &info.name
+                && name != filter
+                && filter != "all"
+            {
+                continue;
             }
 
             let width = output_data.width;
@@ -953,26 +942,25 @@ impl WallpaperDaemon {
         );
 
         // Check if params contains a preset marker
-        if let Some(ref p) = params {
-            if let Some(ref color1) = p.color1 {
-                if let Some(preset_name) = color1.strip_prefix("preset:") {
-                    // Look up preset in config
-                    if let Ok(state) = self.state.try_lock() {
-                        if let Some(config) = &state.config {
-                            if let Some(preset) =
-                                config.shader_preset.iter().find(|p| p.name == preset_name)
-                            {
-                                log::info!("Using shader preset: {}", preset_name);
-                                params = Some(preset.to_params());
-                            } else {
-                                log::warn!("Shader preset '{}' not found in config", preset_name);
-                                params = None;
-                            }
-                        } else {
-                            log::warn!("Cannot use preset '{}': no config loaded", preset_name);
-                            params = None;
-                        }
+        if let Some(ref p) = params
+            && let Some(ref color1) = p.color1
+            && let Some(preset_name) = color1.strip_prefix("preset:")
+        {
+            // Look up preset in config
+            if let Ok(state) = self.state.try_lock() {
+                if let Some(config) = &state.config {
+                    if let Some(preset) =
+                        config.shader_preset.iter().find(|p| p.name == preset_name)
+                    {
+                        log::info!("Using shader preset: {}", preset_name);
+                        params = Some(preset.to_params());
+                    } else {
+                        log::warn!("Shader preset '{}' not found in config", preset_name);
+                        params = None;
                     }
+                } else {
+                    log::warn!("Cannot use preset '{}': no config loaded", preset_name);
+                    params = None;
                 }
             }
         }
@@ -993,14 +981,13 @@ impl WallpaperDaemon {
             }
 
             // Check if this output matches the filter
-            if let Some(filter) = output_filter {
-                if let Some(info) = self.output_state.info(&output_data.output) {
-                    if let Some(name) = &info.name {
-                        if name != filter && filter != "all" {
-                            continue;
-                        }
-                    }
-                }
+            if let Some(filter) = output_filter
+                && let Some(info) = self.output_state.info(&output_data.output)
+                && let Some(name) = &info.name
+                && name != filter
+                && filter != "all"
+            {
+                continue;
             }
 
             let width = output_data.width;
@@ -1081,14 +1068,13 @@ impl WallpaperDaemon {
             }
 
             // Check output filter
-            if let Some(filter) = output_filter {
-                if let Some(info) = self.output_state.info(&output_data.output) {
-                    if let Some(name) = &info.name {
-                        if name != filter && filter != "all" {
-                            continue;
-                        }
-                    }
-                }
+            if let Some(filter) = output_filter
+                && let Some(info) = self.output_state.info(&output_data.output)
+                && let Some(name) = &info.name
+                && name != filter
+                && filter != "all"
+            {
+                continue;
             }
 
             let overlay_mgr = crate::overlay_shader::OverlayManager::new(overlay);
@@ -1122,14 +1108,13 @@ impl WallpaperDaemon {
             }
 
             // Check output filter
-            if let Some(filter) = output_filter {
-                if let Some(info) = self.output_state.info(&output_data.output) {
-                    if let Some(name) = &info.name {
-                        if name != filter && filter != "all" {
-                            continue;
-                        }
-                    }
-                }
+            if let Some(filter) = output_filter
+                && let Some(info) = self.output_state.info(&output_data.output)
+                && let Some(name) = &info.name
+                && name != filter
+                && filter != "all"
+            {
+                continue;
             }
 
             output_data.overlay_manager = None;
@@ -1145,7 +1130,7 @@ impl WallpaperDaemon {
     #[cfg(feature = "gpu")]
     fn apply_overlay_to_frame(
         output_data: &mut OutputData,
-        frame_data: &mut Vec<u8>,
+        frame_data: &mut [u8],
         width: u32,
         height: u32,
     ) -> Result<()> {
@@ -1188,6 +1173,7 @@ impl WallpaperDaemon {
         } else {
             log::trace!("No overlay manager present for this output (CPU-only)");
         }
+
         Ok(())
     }
 
@@ -1275,7 +1261,7 @@ impl WallpaperDaemon {
             static mut UPDATE_COUNTER: u32 = 0;
             unsafe {
                 UPDATE_COUNTER += 1;
-                if UPDATE_COUNTER % 50 == 0 {
+                if UPDATE_COUNTER.is_multiple_of(50) {
                     log::debug!(
                         "GIF frame update: {} outputs in {:.2}ms (parallel: {:.2}ms, sequential: {:.2}ms)",
                         buffers_updated,
@@ -1314,14 +1300,13 @@ impl WallpaperDaemon {
             }
 
             // Check if this output matches the filter
-            if let Some(filter) = output_filter {
-                if let Some(info) = self.output_state.info(&output_data.output) {
-                    if let Some(name) = &info.name {
-                        if name != filter && filter != "all" {
-                            continue;
-                        }
-                    }
-                }
+            if let Some(filter) = output_filter
+                && let Some(info) = self.output_state.info(&output_data.output)
+                && let Some(name) = &info.name
+                && name != filter
+                && filter != "all"
+            {
+                continue;
             }
 
             let width = output_data.width;
@@ -1470,19 +1455,19 @@ impl WallpaperDaemon {
             }
 
             // Attach and commit
-            if let Some(layer_surface) = &output_data.layer_surface {
-                if let Some(buffer) = &output_data.buffer {
-                    layer_surface
-                        .wl_surface()
-                        .attach(Some(buffer.buffer()), 0, 0);
-                    layer_surface.wl_surface().damage_buffer(
-                        0,
-                        0,
-                        update.width as i32,
-                        update.height as i32,
-                    );
-                    layer_surface.wl_surface().commit();
-                }
+            if let Some(layer_surface) = &output_data.layer_surface
+                && let Some(buffer) = &output_data.buffer
+            {
+                layer_surface
+                    .wl_surface()
+                    .attach(Some(buffer.buffer()), 0, 0);
+                layer_surface.wl_surface().damage_buffer(
+                    0,
+                    0,
+                    update.width as i32,
+                    update.height as i32,
+                );
+                layer_surface.wl_surface().commit();
             }
 
             buffers_updated += 1;
@@ -1495,7 +1480,7 @@ impl WallpaperDaemon {
             static mut UPDATE_COUNTER: u32 = 0;
             unsafe {
                 UPDATE_COUNTER += 1;
-                if UPDATE_COUNTER % 100 == 0 {
+                if UPDATE_COUNTER.is_multiple_of(100) {
                     log::debug!(
                         "Video frame update: {} outputs in {:.2}ms (parallel: {:.2}ms, sequential: {:.2}ms)",
                         buffers_updated,
@@ -1555,16 +1540,16 @@ impl WallpaperDaemon {
             }
 
             // Commit to Wayland
-            if let Some(layer_surface) = &output_data.layer_surface {
-                if let Some(buffer) = &output_data.buffer {
-                    layer_surface
-                        .wl_surface()
-                        .attach(Some(buffer.buffer()), 0, 0);
-                    layer_surface
-                        .wl_surface()
-                        .damage_buffer(0, 0, width as i32, height as i32);
-                    layer_surface.wl_surface().commit();
-                }
+            if let Some(layer_surface) = &output_data.layer_surface
+                && let Some(buffer) = &output_data.buffer
+            {
+                layer_surface
+                    .wl_surface()
+                    .attach(Some(buffer.buffer()), 0, 0);
+                layer_surface
+                    .wl_surface()
+                    .damage_buffer(0, 0, width as i32, height as i32);
+                layer_surface.wl_surface().commit();
             }
         }
 
@@ -1620,19 +1605,16 @@ impl WallpaperDaemon {
                     }
 
                     // Commit to Wayland
-                    if let Some(layer_surface) = &output_data.layer_surface {
-                        if let Some(buffer) = &output_data.buffer {
-                            layer_surface
-                                .wl_surface()
-                                .attach(Some(buffer.buffer()), 0, 0);
-                            layer_surface.wl_surface().damage_buffer(
-                                0,
-                                0,
-                                width as i32,
-                                height as i32,
-                            );
-                            layer_surface.wl_surface().commit();
-                        }
+                    if let Some(layer_surface) = &output_data.layer_surface
+                        && let Some(buffer) = &output_data.buffer
+                    {
+                        layer_surface
+                            .wl_surface()
+                            .attach(Some(buffer.buffer()), 0, 0);
+                        layer_surface
+                            .wl_surface()
+                            .damage_buffer(0, 0, width as i32, height as i32);
+                        layer_surface.wl_surface().commit();
                     }
                 }
 
@@ -1673,16 +1655,16 @@ impl WallpaperDaemon {
             }
 
             // Attach and commit
-            if let Some(layer_surface) = &output_data.layer_surface {
-                if let Some(buffer) = &output_data.buffer {
-                    layer_surface
-                        .wl_surface()
-                        .attach(Some(buffer.buffer()), 0, 0);
-                    layer_surface
-                        .wl_surface()
-                        .damage_buffer(0, 0, width as i32, height as i32);
-                    layer_surface.wl_surface().commit();
-                }
+            if let Some(layer_surface) = &output_data.layer_surface
+                && let Some(buffer) = &output_data.buffer
+            {
+                layer_surface
+                    .wl_surface()
+                    .attach(Some(buffer.buffer()), 0, 0);
+                layer_surface
+                    .wl_surface()
+                    .damage_buffer(0, 0, width as i32, height as i32);
+                layer_surface.wl_surface().commit();
             }
         }
 
@@ -1720,9 +1702,9 @@ impl WallpaperDaemon {
         // but not too frequently to waste CPU
         for output_data in &self.outputs {
             if let Some(video_manager) = &output_data.video_manager {
-                // Use detected frame duration, or fall back to 8ms polling
-                // We poll at half the frame duration to catch frames promptly
-                let video_poll_rate = video_manager.frame_duration() / 2;
+                // Poll at the frame rate (not half) - GStreamer buffers frames for us
+                // This reduces CPU usage significantly while still being responsive
+                let video_poll_rate = video_manager.frame_duration();
                 if video_poll_rate < min_delay {
                     min_delay = video_poll_rate;
                 }
@@ -1822,9 +1804,11 @@ impl WallpaperDaemon {
                 },
                 "random" => {
                     use rand::Rng;
-                    let mut rng = rand::thread_rng();
+
+                    let mut rng = rand::rng();
                     let dur_ms = duration as u32;
-                    match rng.gen_range(0..8) {
+
+                    match rng.random_range(0..8) {
                         0 => common::TransitionType::Fade {
                             duration_ms: dur_ms,
                         },
@@ -1928,8 +1912,9 @@ impl WallpaperDaemon {
                 },
                 "random" => {
                     use rand::Rng;
-                    let mut rng = rand::thread_rng();
-                    match rng.gen_range(0..8) {
+                    let mut rng = rand::rng();
+
+                    match rng.random_range(0..8) {
                         0 => common::TransitionType::Fade {
                             duration_ms: duration,
                         },
@@ -2047,22 +2032,21 @@ impl WallpaperDaemon {
         }
 
         // If no per-output wallpapers were configured, try to start playlist
-        if commands.is_empty() {
-            if let Some(ref playlist) = state.playlist {
-                if let Some(first) = playlist.current() {
-                    log::info!("Starting playlist with: {}", first.display());
-                    let first_path = first.to_path_buf();
+        if commands.is_empty()
+            && let Some(ref playlist) = state.playlist
+            && let Some(first) = playlist.current()
+        {
+            log::info!("Starting playlist with: {}", first.display());
+            let first_path = first.to_path_buf();
 
-                    let cmd = crate::WallpaperCommand::SetImage {
-                        path: first_path.to_string_lossy().to_string(),
-                        output: None,
-                        scale: common::ScaleMode::Fill,
-                        transition: Some(common::TransitionType::Fade { duration_ms: 500 }),
-                    };
+            let cmd = crate::WallpaperCommand::SetImage {
+                path: first_path.to_string_lossy().to_string(),
+                output: None,
+                scale: common::ScaleMode::Fill,
+                transition: Some(common::TransitionType::Fade { duration_ms: 500 }),
+            };
 
-                    commands.push(cmd);
-                }
-            }
+            commands.push(cmd);
         }
 
         // Drop the lock before applying commands
