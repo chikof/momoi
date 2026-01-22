@@ -63,7 +63,32 @@ pub(super) fn update_gif_frames(
             "GIF frame"
         );
 
-        // Create new buffer and render (no scaling needed!)
+        // For GIF frames, reuse the existing buffer to avoid memory leak
+        if let Some(buffer) = &mut output_data.buffer {
+            if buffer.width() == update.width && buffer.height() == update.height {
+                if let Err(e) = buffer.write_image_data(&final_data) {
+                    log::warn!("Failed to reuse GIF buffer: {}", e);
+                } else {
+                    // Successfully reused buffer
+                    if let Some(layer_surface) = &output_data.layer_surface {
+                        layer_surface
+                            .wl_surface()
+                            .attach(Some(buffer.buffer()), 0, 0);
+                        layer_surface.wl_surface().damage_buffer(
+                            0,
+                            0,
+                            update.width as i32,
+                            update.height as i32,
+                        );
+                        layer_surface.wl_surface().commit();
+                    }
+                    buffers_updated += 1;
+                    continue;
+                }
+            }
+        }
+
+        // Create new buffer if needed
         let mut buffer =
             crate::buffer::ShmBuffer::new(app_data.shm.wl_shm(), update.width, update.height, qh)?;
         buffer.write_image_data(&final_data)?;
@@ -82,12 +107,8 @@ pub(super) fn update_gif_frames(
             layer_surface.wl_surface().commit();
         }
 
-        // Mark buffer as busy (compositor is using it)
-        buffer.mark_busy();
-
-        // Swap buffer (moves old buffer to pool)
-        output_data.swap_buffer(buffer);
-        output_data.cleanup_buffer_pool();
+        // Replace buffer directly (no pooling)
+        output_data.buffer = Some(buffer);
 
         buffers_updated += 1;
     }
@@ -174,8 +195,41 @@ pub(super) fn update_video_frames(
             "video frame"
         );
 
-        // Get or create a buffer (will reuse from pool if available)
-        let mut buffer = output_data.get_buffer(&app_data.shm, update.width, update.height, qh)?;
+        // For video frames, reuse the existing buffer instead of creating new ones
+        // This avoids the buffer pool leak when compositor doesn't send release events
+        if let Some(buffer) = &mut output_data.buffer {
+            // Reuse existing buffer (just update the data)
+            if buffer.width() == update.width && buffer.height() == update.height {
+                if let Err(e) = buffer.write_image_data(&final_data) {
+                    log::warn!("Failed to reuse video buffer: {}", e);
+                    // Fall through to create new buffer
+                } else {
+                    // Successfully reused buffer, attach and commit
+                    if let Some(layer_surface) = &output_data.layer_surface {
+                        layer_surface
+                            .wl_surface()
+                            .attach(Some(buffer.buffer()), 0, 0);
+                        layer_surface.wl_surface().damage_buffer(
+                            0,
+                            0,
+                            update.width as i32,
+                            update.height as i32,
+                        );
+                        layer_surface.wl_surface().commit();
+                    }
+                    buffers_updated += 1;
+                    continue;
+                }
+            }
+        }
+
+        // No existing buffer or wrong size - create new one
+        let mut buffer = crate::buffer::ShmBuffer::new(
+            &app_data.shm.wl_shm(),
+            update.width,
+            update.height,
+            qh,
+        )?;
         buffer.write_image_data(&final_data)?;
 
         // Attach and commit
@@ -192,12 +246,8 @@ pub(super) fn update_video_frames(
             layer_surface.wl_surface().commit();
         }
 
-        // Mark buffer as busy (compositor is using it)
-        buffer.mark_busy();
-
-        // Swap buffer (moves old buffer to pool)
-        output_data.swap_buffer(buffer);
-        output_data.cleanup_buffer_pool();
+        // Replace buffer (drop old one directly, no pooling for video)
+        output_data.buffer = Some(buffer);
 
         buffers_updated += 1;
     }
@@ -264,8 +314,29 @@ pub(super) fn update_shader_frames(
             "shader frame"
         );
 
-        // Get or create a buffer (will reuse from pool if available)
-        let mut buffer = output_data.get_buffer(&app_data.shm, width, height, qh)?;
+        // For shader frames, reuse the existing buffer to avoid memory leak
+        if let Some(buffer) = &mut output_data.buffer {
+            if buffer.width() == width && buffer.height() == height {
+                if let Err(e) = buffer.write_image_data(&frame_data) {
+                    log::warn!("Failed to reuse shader buffer: {}", e);
+                } else {
+                    // Successfully reused buffer
+                    if let Some(layer_surface) = &output_data.layer_surface {
+                        layer_surface
+                            .wl_surface()
+                            .attach(Some(buffer.buffer()), 0, 0);
+                        layer_surface
+                            .wl_surface()
+                            .damage_buffer(0, 0, width as i32, height as i32);
+                        layer_surface.wl_surface().commit();
+                    }
+                    continue;
+                }
+            }
+        }
+
+        // Create new buffer if needed
+        let mut buffer = crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
         buffer.write_image_data(&frame_data)?;
 
         // Commit to Wayland
@@ -279,12 +350,8 @@ pub(super) fn update_shader_frames(
             layer_surface.wl_surface().commit();
         }
 
-        // Mark buffer as busy (compositor is using it)
-        buffer.mark_busy();
-
-        // Swap buffer (moves old buffer to pool)
-        output_data.swap_buffer(buffer);
-        output_data.cleanup_buffer_pool();
+        // Replace buffer directly (no pooling)
+        output_data.buffer = Some(buffer);
     }
 
     Ok(())

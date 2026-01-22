@@ -186,11 +186,7 @@ impl LayerShellHandler for WallpaperDaemon {
                         layer.wl_surface().commit();
 
                         // Mark buffer as busy (compositor is using it)
-                        buffer.mark_busy();
-
-                        // Swap buffer (moves old buffer to pool)
-                        output_data.swap_buffer(buffer);
-                        output_data.cleanup_buffer_pool();
+                        output_data.buffer = Some(buffer);
 
                         log::info!("Rendered default color to output");
                     }

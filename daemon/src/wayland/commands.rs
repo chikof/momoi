@@ -246,11 +246,10 @@ fn set_image_wallpaper(
         }
 
         // Mark buffer as busy (compositor is using it)
-        buffer.mark_busy();
+        // Just replace buffer directly
 
         // Swap buffer (moves old buffer to pool)
-        output_data.swap_buffer(buffer);
-        output_data.cleanup_buffer_pool();
+        output_data.buffer = Some(buffer);
 
         log::info!("Applied wallpaper to output {}x{}", width, height);
     }
@@ -360,11 +359,10 @@ fn set_animated_gif(
         }
 
         // Mark buffer as busy (compositor is using it)
-        buffer.mark_busy();
+        // Just replace buffer directly
 
         // Swap buffer (moves old buffer to pool)
-        output_data.swap_buffer(buffer);
-        output_data.cleanup_buffer_pool();
+        output_data.buffer = Some(buffer);
 
         output_data.gif_manager = Some(gif_manager);
 
@@ -458,11 +456,10 @@ fn set_color_wallpaper(
         }
 
         // Mark buffer as busy (compositor is using it)
-        buffer.mark_busy();
+        // Just replace buffer directly
 
         // Swap buffer (moves old buffer to pool)
-        output_data.swap_buffer(buffer);
-        output_data.cleanup_buffer_pool();
+        output_data.buffer = Some(buffer);
 
         log::info!("Applied color to output {}x{}", width, height);
     }
