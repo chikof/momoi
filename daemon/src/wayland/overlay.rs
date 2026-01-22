@@ -1,5 +1,3 @@
-/// Overlay shader management for the Wayland manager
-
 use anyhow::Result;
 use smithay_client_toolkit::output::OutputState;
 use wayland_client::protocol::wl_output;

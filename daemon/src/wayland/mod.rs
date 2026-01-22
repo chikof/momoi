@@ -10,17 +10,17 @@
 // - event_handlers: Wayland protocol event handlers
 // - utils: Helper functions and utilities
 
-mod daemon;
 mod commands;
+mod daemon;
+mod event_handlers;
 mod frame_updates;
+mod outputs;
 mod overlay;
 mod transitions;
-mod outputs;
-mod event_handlers;
 mod utils;
 
 // Re-export the main entry point
 pub use daemon::run;
 
 // Re-export types that other modules need
-pub(crate) use daemon::{WallpaperDaemon, OutputData, FrameUpdate};
+pub(crate) use daemon::{FrameUpdate, OutputData, WallpaperDaemon};

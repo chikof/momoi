@@ -1,7 +1,3 @@
-/// Wallpaper command handlers
-/// 
-/// This module handles all wallpaper-related commands: images, videos, GIFs, shaders, colors, and overlays
-
 use anyhow::Result;
 use smithay_client_toolkit::shell::WaylandSurface;
 use wayland_client::QueueHandle;
@@ -35,22 +31,18 @@ pub(super) fn handle_wallpaper_command(
             overlay,
             params,
             output,
-        } => {
-            super::overlay::set_overlay_shader(
-                &mut app_data.outputs,
-                &app_data.output_state,
-                &overlay,
-                params,
-                output.as_deref(),
-            )
-        }
-        WallpaperCommand::ClearOverlay { output } => {
-            super::overlay::clear_overlay_shader(
-                &mut app_data.outputs,
-                &app_data.output_state,
-                output.as_deref(),
-            )
-        }
+        } => super::overlay::set_overlay_shader(
+            &mut app_data.outputs,
+            &app_data.output_state,
+            &overlay,
+            params,
+            output.as_deref(),
+        ),
+        WallpaperCommand::ClearOverlay { output } => super::overlay::clear_overlay_shader(
+            &mut app_data.outputs,
+            &app_data.output_state,
+            output.as_deref(),
+        ),
     }
 }
 
@@ -273,8 +265,7 @@ fn set_image_wallpaper(
             }
         } else {
             // Apply to all outputs
-            let output_names: Vec<String> =
-                state.outputs.iter().map(|o| o.name.clone()).collect();
+            let output_names: Vec<String> = state.outputs.iter().map(|o| o.name.clone()).collect();
             for name in output_names {
                 state.wallpapers.insert(name, wallpaper_type.clone());
             }
@@ -373,10 +364,14 @@ fn set_animated_gif(
     if let Ok(mut state) = app_data.state.try_lock() {
         let wallpaper_type = common::WallpaperType::Image(path.to_string());
         if let Some(filter) = output_filter {
-            if let Some(info) = app_data
-                .output_state
-                .info(&app_data.outputs.iter().find(|o| o.configured).unwrap().output)
-            {
+            if let Some(info) = app_data.output_state.info(
+                &app_data
+                    .outputs
+                    .iter()
+                    .find(|o| o.configured)
+                    .unwrap()
+                    .output,
+            ) {
                 if let Some(name) = &info.name {
                     state
                         .wallpapers
@@ -387,8 +382,7 @@ fn set_animated_gif(
             }
         } else {
             // Apply to all outputs
-            let output_names: Vec<String> =
-                state.outputs.iter().map(|o| o.name.clone()).collect();
+            let output_names: Vec<String> = state.outputs.iter().map(|o| o.name.clone()).collect();
             for name in output_names {
                 state.wallpapers.insert(name, wallpaper_type.clone());
             }
@@ -438,7 +432,7 @@ fn set_color_wallpaper(
         }
 
         // Create buffer and fill with color
-        let mut buffer = crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
+        let mut buffer = crate::buffer::ShmBuffer::new(app_data.shm.wl_shm(), width, height, qh)?;
         buffer.fill_color(r, g, b, a);
 
         // Attach and commit
@@ -472,8 +466,7 @@ fn set_color_wallpaper(
             }
         } else {
             // Apply to all outputs
-            let output_names: Vec<String> =
-                state.outputs.iter().map(|o| o.name.clone()).collect();
+            let output_names: Vec<String> = state.outputs.iter().map(|o| o.name.clone()).collect();
             for name in output_names {
                 state.wallpapers.insert(name, wallpaper_type.clone());
             }
@@ -505,9 +498,7 @@ fn set_shader_wallpaper(
         // Look up preset in config
         if let Ok(state) = app_data.state.try_lock() {
             if let Some(config) = &state.config {
-                if let Some(preset) =
-                    config.shader_preset.iter().find(|p| p.name == preset_name)
-                {
+                if let Some(preset) = config.shader_preset.iter().find(|p| p.name == preset_name) {
                     log::info!("Using shader preset: {}", preset_name);
                     params = Some(preset.to_params());
                 } else {
@@ -522,13 +513,12 @@ fn set_shader_wallpaper(
     }
 
     // Parse shader type
-    let shader =
-        crate::shader_manager::BuiltinShader::from_str(shader_name).ok_or_else(|| {
-            anyhow::anyhow!(
-                "Unknown shader: {}. Available: plasma, waves, matrix, gradient, starfield",
-                shader_name
-            )
-        })?;
+    let shader = crate::shader_manager::BuiltinShader::from_str(shader_name).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Unknown shader: {}. Available: plasma, waves, matrix, gradient, starfield",
+            shader_name
+        )
+    })?;
 
     // Apply to matching outputs
     for output_data in &mut app_data.outputs {
@@ -591,8 +581,7 @@ fn set_shader_wallpaper(
             }
         } else {
             // Apply to all outputs
-            let output_names: Vec<String> =
-                state.outputs.iter().map(|o| o.name.clone()).collect();
+            let output_names: Vec<String> = state.outputs.iter().map(|o| o.name.clone()).collect();
             for name in output_names {
                 state.wallpapers.insert(name, wallpaper_type.clone());
             }
@@ -673,8 +662,7 @@ fn set_video_wallpaper(
             }
         } else {
             // Apply to all outputs
-            let output_names: Vec<String> =
-                state.outputs.iter().map(|o| o.name.clone()).collect();
+            let output_names: Vec<String> = state.outputs.iter().map(|o| o.name.clone()).collect();
             for name in output_names {
                 state.wallpapers.insert(name, wallpaper_type.clone());
             }

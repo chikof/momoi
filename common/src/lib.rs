@@ -690,9 +690,6 @@ mod tests {
     #[test]
     fn test_socket_path() {
         let path = get_socket_path();
-        assert!(path
-            .to_str()
-            .unwrap()
-            .contains("momoi.sock"));
+        assert!(path.to_str().unwrap().contains("momoi.sock"));
     }
 }

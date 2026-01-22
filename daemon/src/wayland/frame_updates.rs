@@ -1,14 +1,15 @@
-/// Frame update logic for videos, GIFs, and shaders
-
 use anyhow::Result;
 use rayon::prelude::*;
 use smithay_client_toolkit::shell::WaylandSurface;
 use wayland_client::QueueHandle;
 
-use super::{WallpaperDaemon, FrameUpdate};
+use super::{FrameUpdate, WallpaperDaemon};
 use crate::apply_overlay_or_warn;
 
-pub(super) fn update_gif_frames(app_data: &mut WallpaperDaemon, qh: &QueueHandle<WallpaperDaemon>) -> Result<()> {
+pub(super) fn update_gif_frames(
+    app_data: &mut WallpaperDaemon,
+    qh: &QueueHandle<WallpaperDaemon>,
+) -> Result<()> {
     use std::time::Instant;
     let start = Instant::now();
 
@@ -108,7 +109,10 @@ pub(super) fn update_gif_frames(app_data: &mut WallpaperDaemon, qh: &QueueHandle
 }
 
 #[cfg(feature = "video")]
-pub(super) fn update_video_frames(app_data: &mut WallpaperDaemon, qh: &QueueHandle<WallpaperDaemon>) -> Result<()> {
+pub(super) fn update_video_frames(
+    app_data: &mut WallpaperDaemon,
+    qh: &QueueHandle<WallpaperDaemon>,
+) -> Result<()> {
     use std::time::Instant;
     let start = Instant::now();
 
@@ -233,12 +237,18 @@ pub(super) fn update_video_frames(app_data: &mut WallpaperDaemon, qh: &QueueHand
 }
 
 #[cfg(not(feature = "video"))]
-pub(super) fn update_video_frames(_app_data: &mut WallpaperDaemon, _qh: &QueueHandle<WallpaperDaemon>) -> Result<()> {
+pub(super) fn update_video_frames(
+    _app_data: &mut WallpaperDaemon,
+    _qh: &QueueHandle<WallpaperDaemon>,
+) -> Result<()> {
     Ok(())
 }
 
 /// Update shader frames
-pub(super) fn update_shader_frames(app_data: &mut WallpaperDaemon, qh: &QueueHandle<WallpaperDaemon>) -> Result<()> {
+pub(super) fn update_shader_frames(
+    app_data: &mut WallpaperDaemon,
+    qh: &QueueHandle<WallpaperDaemon>,
+) -> Result<()> {
     for output_data in &mut app_data.outputs {
         let shader_mgr = match &mut output_data.shader_manager {
             Some(mgr) => mgr,

@@ -1,24 +1,15 @@
-/// Core daemon state and event loop for Wayland wallpaper management
-
 use anyhow::Result;
 use smithay_client_toolkit::{
-    compositor::CompositorState,
-    output::OutputState,
-    registry::RegistryState,
-    shell::wlr_layer::LayerShell,
-    shm::Shm,
+    compositor::CompositorState, output::OutputState, registry::RegistryState,
+    shell::wlr_layer::LayerShell, shm::Shm,
 };
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
-use wayland_client::{
-    Connection, QueueHandle,
-    globals::registry_queue_init,
-    protocol::wl_output,
-};
+use wayland_client::{Connection, QueueHandle, globals::registry_queue_init, protocol::wl_output};
 
+use crate::log_and_continue;
 use crate::wallpaper_manager::WallpaperManager;
 use crate::{DaemonState, WallpaperCommand};
-use crate::log_and_continue;
 
 /// Main entry point for the Wayland manager
 pub async fn run(
@@ -208,23 +199,41 @@ fn run_wayland_blocking(
 
         // Check for wallpaper commands
         if let Ok(cmd) = wallpaper_rx.try_recv() {
-            log_and_continue!(super::commands::handle_wallpaper_command(&mut app_data, cmd, &qh), "handle wallpaper command");
+            log_and_continue!(
+                super::commands::handle_wallpaper_command(&mut app_data, cmd, &qh),
+                "handle wallpaper command"
+            );
         }
 
         // Update animated GIF frames
-        log_and_continue!(super::frame_updates::update_gif_frames(&mut app_data, &qh), "update GIF frames");
+        log_and_continue!(
+            super::frame_updates::update_gif_frames(&mut app_data, &qh),
+            "update GIF frames"
+        );
 
         // Update video frames
-        log_and_continue!(super::frame_updates::update_video_frames(&mut app_data, &qh), "update video frames");
+        log_and_continue!(
+            super::frame_updates::update_video_frames(&mut app_data, &qh),
+            "update video frames"
+        );
 
         // Update shader frames
-        log_and_continue!(super::frame_updates::update_shader_frames(&mut app_data, &qh), "update shader frames");
+        log_and_continue!(
+            super::frame_updates::update_shader_frames(&mut app_data, &qh),
+            "update shader frames"
+        );
 
         // Update transitions
-        log_and_continue!(super::transitions::update_transitions(&mut app_data, &qh), "update transitions");
+        log_and_continue!(
+            super::transitions::update_transitions(&mut app_data, &qh),
+            "update transitions"
+        );
 
         // Check playlist rotation
-        log_and_continue!(check_playlist_rotation(&mut app_data, &qh), "check playlist rotation");
+        log_and_continue!(
+            check_playlist_rotation(&mut app_data, &qh),
+            "check playlist rotation"
+        );
 
         // Check schedule
         log_and_continue!(check_schedule(&mut app_data, &qh), "check schedule");
@@ -355,7 +364,10 @@ fn get_next_frame_delay(app_data: &WallpaperDaemon) -> std::time::Duration {
     min_delay.clamp(Duration::from_millis(1), Duration::from_millis(16))
 }
 
-fn check_playlist_rotation(app_data: &mut WallpaperDaemon, qh: &QueueHandle<WallpaperDaemon>) -> Result<()> {
+fn check_playlist_rotation(
+    app_data: &mut WallpaperDaemon,
+    qh: &QueueHandle<WallpaperDaemon>,
+) -> Result<()> {
     // Check if we have a playlist and if it's time to rotate
     let should_rotate = {
         if let Ok(state) = app_data.state.try_lock() {
@@ -457,7 +469,8 @@ fn check_schedule(app_data: &mut WallpaperDaemon, qh: &QueueHandle<WallpaperDaem
         let duration = scheduled.duration as u32;
 
         // Parse transition type
-        let transition_type = super::utils::parse_transition(&scheduled.transition, duration as i32);
+        let transition_type =
+            super::utils::parse_transition(&scheduled.transition, duration as i32);
 
         // Set the wallpaper
         let cmd = crate::WallpaperCommand::SetImage {
@@ -500,7 +513,10 @@ fn check_resources(app_data: &mut WallpaperDaemon) -> Result<()> {
 }
 
 /// Apply initial wallpapers from configuration on startup
-fn apply_initial_config(app_data: &mut WallpaperDaemon, qh: &QueueHandle<WallpaperDaemon>) -> Result<()> {
+fn apply_initial_config(
+    app_data: &mut WallpaperDaemon,
+    qh: &QueueHandle<WallpaperDaemon>,
+) -> Result<()> {
     let state_lock = app_data.state.try_lock();
     if state_lock.is_err() {
         log::warn!("Could not acquire state lock for initial config");

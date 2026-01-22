@@ -1,5 +1,3 @@
-/// Wayland protocol event handlers
-
 use smithay_client_toolkit::{
     compositor::CompositorHandler,
     delegate_compositor, delegate_layer, delegate_output, delegate_registry, delegate_shm,

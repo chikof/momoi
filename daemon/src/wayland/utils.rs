@@ -1,5 +1,3 @@
-/// Utility functions for the Wayland manager
-
 /// Parse scale mode string to ScaleMode enum
 pub(super) fn parse_scale_mode(scale: &str) -> common::ScaleMode {
     match scale {

@@ -1,5 +1,3 @@
-/// Transition animation handling
-
 use anyhow::Result;
 use smithay_client_toolkit::shell::WaylandSurface;
 use wayland_client::QueueHandle;
@@ -8,7 +6,10 @@ use super::WallpaperDaemon;
 use crate::apply_overlay_or_warn;
 
 /// Update active transitions
-pub(super) fn update_transitions(app_data: &mut WallpaperDaemon, qh: &QueueHandle<WallpaperDaemon>) -> Result<()> {
+pub(super) fn update_transitions(
+    app_data: &mut WallpaperDaemon,
+    qh: &QueueHandle<WallpaperDaemon>,
+) -> Result<()> {
     for output_data in &mut app_data.outputs {
         let Some(transition) = &output_data.transition else {
             continue; // No active transition

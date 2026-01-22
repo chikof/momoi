@@ -1,15 +1,11 @@
-/// Output and layer surface management
-
 use anyhow::Result;
-use smithay_client_toolkit::{
-    shell::{
-        WaylandSurface,
-        wlr_layer::{Anchor, KeyboardInteractivity, Layer},
-    },
+use smithay_client_toolkit::shell::{
+    WaylandSurface,
+    wlr_layer::{Anchor, KeyboardInteractivity, Layer},
 };
 use wayland_client::{QueueHandle, protocol::wl_output};
 
-use super::{WallpaperDaemon, OutputData};
+use super::{OutputData, WallpaperDaemon};
 use crate::WallpaperCommand;
 
 /// Synchronize output information to shared state
@@ -41,7 +37,10 @@ pub(super) fn sync_outputs_to_shared_state(app_data: &mut WallpaperDaemon) {
 }
 
 /// Restore wallpapers from shared state after reconnection
-pub(super) fn restore_wallpapers_from_state(app_data: &mut WallpaperDaemon, qh: &QueueHandle<WallpaperDaemon>) -> Result<()> {
+pub(super) fn restore_wallpapers_from_state(
+    app_data: &mut WallpaperDaemon,
+    qh: &QueueHandle<WallpaperDaemon>,
+) -> Result<()> {
     let wallpapers = if let Ok(state) = app_data.state.try_lock() {
         state.wallpapers.clone()
     } else {
