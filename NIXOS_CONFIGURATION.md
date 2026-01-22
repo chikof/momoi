@@ -500,11 +500,21 @@ You can combine multiple configuration methods:
 
 After changing configuration:
 
+**For NixOS system module:**
 ```bash
 # Rebuild NixOS
 sudo nixos-rebuild switch
 
-# Or for Home Manager
+# Check daemon status
+systemctl --user status momoi
+
+# View logs
+journalctl --user -u momoi -f
+```
+
+**For Home Manager:**
+```bash
+# Rebuild Home Manager
 home-manager switch
 
 # Check daemon status
@@ -516,18 +526,77 @@ journalctl --user -u momoi -f
 
 ## Home Manager Support
 
-To use with Home Manager instead of NixOS system config:
+Momoi can also be configured via Home Manager for per-user configuration.
+
+### Setup
+
+Add to your Home Manager flake:
 
 ```nix
 {
-  imports = [ momoi.homeManagerModules.default ];
-  
-  services.momoi = {
-    enable = true;
-    settings = { /* ... */ };
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    home-manager.url = "github:nix-community/home-manager";
+    momoi.url = "github:chikof/momoi";
+  };
+
+  outputs = { nixpkgs, home-manager, momoi, ... }: {
+    homeConfigurations."youruser" = home-manager.lib.homeManagerConfiguration {
+      pkgs = nixpkgs.legacyPackages.x86_64-linux;
+      modules = [
+        momoi.homeManagerModules.default
+        ./home.nix
+      ];
+    };
   };
 }
 ```
+
+### Configuration in home.nix
+
+```nix
+{
+  services.momoi = {
+    enable = true;
+    
+    settings = {
+      general = {
+        logLevel = "info";
+        defaultTransition = "fade";
+      };
+      
+      playlist = {
+        enabled = true;
+        interval = 300;
+        sources = [ "~/Pictures/Wallpapers" ];
+      };
+      
+      shaderPresets = [
+        {
+          name = "evening";
+          shader = "plasma";
+          speed = 0.5;
+          color1 = "1a1a2e";
+        }
+      ];
+    };
+  };
+}
+```
+
+### Differences from NixOS Module
+
+**Home Manager module:**
+- Config file placed in `~/.config/momoi/config.toml` (user-specific)
+- Service runs per-user
+- Package installed per-user
+- Ideal for multi-user systems or non-NixOS with Nix + Home Manager
+
+**NixOS module:**
+- Config file in `/etc/momoi/config.toml` (system-wide)
+- Symlinked to each user's home directory
+- Package installed system-wide
+- Ideal for single-user systems or when all users should have same config
 
 ## See Also
 
