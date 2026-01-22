@@ -11,7 +11,7 @@ mod shader_manager;
 mod transition;
 mod video_manager;
 mod wallpaper_manager;
-mod wayland_manager;
+mod wayland;
 
 #[cfg(feature = "gpu")]
 mod gpu;
@@ -198,7 +198,7 @@ async fn main() -> Result<()> {
     // Start Wayland event loop
     let wayland_state = state.clone();
     let wayland_handle = tokio::spawn(async move {
-        if let Err(e) = wayland_manager::run(wayland_state, wallpaper_rx).await {
+        if let Err(e) = wayland::run(wayland_state, wallpaper_rx).await {
             log::error!("Wayland manager error: {}", e);
         }
     });
