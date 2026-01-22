@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::time::Instant;
+use crate::log_params_once;
 
 /// Overlay shader types that render on top of existing wallpapers
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -194,51 +195,37 @@ impl OverlayManager {
 
         match self.overlay {
             OverlayShader::Vignette { strength } => {
-                if self.frame == 1 {
-                    log::info!("Vignette parameters: strength={}", strength);
-                }
+                log_params_once!(self.frame, "Vignette", "strength" => strength);
                 self.apply_vignette(buffer, width, height, strength);
             }
             OverlayShader::Scanlines {
                 intensity,
                 line_width,
             } => {
-                if self.frame == 1 {
-                    log::info!("Scanlines parameters: intensity={}, line_width={}", intensity, line_width);
-                }
+                log_params_once!(self.frame, "Scanlines", "intensity" => intensity, "line_width" => line_width);
                 self.apply_scanlines(buffer, width, height, intensity, line_width);
             }
             OverlayShader::FilmGrain { intensity } => {
-                if self.frame == 1 {
-                    log::info!("FilmGrain parameters: intensity={}", intensity);
-                }
+                log_params_once!(self.frame, "FilmGrain", "intensity" => intensity);
                 self.apply_film_grain(buffer, width, height, intensity, time);
             }
             OverlayShader::ChromaticAberration { offset } => {
-                if self.frame == 1 {
-                    log::info!("ChromaticAberration parameters: offset={}", offset);
-                }
+                log_params_once!(self.frame, "ChromaticAberration", "offset" => offset);
                 self.apply_chromatic_aberration(buffer, width, height, offset);
             }
             OverlayShader::CRT {
                 curvature,
                 scanline_intensity,
             } => {
-                if self.frame == 1 {
-                    log::info!("CRT parameters: curvature={}, scanline_intensity={}", curvature, scanline_intensity);
-                }
+                log_params_once!(self.frame, "CRT", "curvature" => curvature, "scanline_intensity" => scanline_intensity);
                 self.apply_crt(buffer, width, height, curvature, scanline_intensity);
             }
             OverlayShader::Pixelate { pixel_size } => {
-                if self.frame == 1 {
-                    log::info!("Pixelate parameters: pixel_size={}", pixel_size);
-                }
+                log_params_once!(self.frame, "Pixelate", "pixel_size" => pixel_size);
                 self.apply_pixelate(buffer, width, height, pixel_size);
             }
             OverlayShader::ColorTint { r, g, b, strength } => {
-                if self.frame == 1 {
-                    log::info!("ColorTint parameters: r={}, g={}, b={}, strength={}", r, g, b, strength);
-                }
+                log_params_once!(self.frame, "ColorTint", "r" => r, "g" => g, "b" => b, "strength" => strength);
                 self.apply_color_tint(buffer, width, height, r, g, b, strength);
             }
         }

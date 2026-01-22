@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
+use crate::validate_enum;
 
 /// Main configuration structure
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -359,18 +360,23 @@ impl Config {
     }
 
     fn validate_transition(&self, transition: &str) -> Result<()> {
-        match transition {
-            "none" | "fade" | "wipe-left" | "wipe-right" | "wipe-top" | "wipe-bottom"
-            | "wipe-angle" | "center" | "outer" | "random" => Ok(()),
-            _ => anyhow::bail!("Invalid transition: {}", transition),
-        }
+        validate_enum!(
+            transition,
+            "none",
+            "fade",
+            "wipe-left",
+            "wipe-right",
+            "wipe-top",
+            "wipe-bottom",
+            "wipe-angle",
+            "center",
+            "outer",
+            "random"
+        )
     }
 
     fn validate_scale(&self, scale: &str) -> Result<()> {
-        match scale {
-            "center" | "fill" | "fit" | "stretch" | "tile" => Ok(()),
-            _ => anyhow::bail!("Invalid scale mode: {}", scale),
-        }
+        validate_enum!(scale, "center", "fill", "fit", "stretch", "tile")
     }
 
     fn validate_time(&self, time: &str) -> Result<()> {

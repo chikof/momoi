@@ -2,6 +2,7 @@ mod buffer;
 mod config;
 mod gif_manager;
 mod ipc_server;
+mod macros;
 mod overlay_shader;
 mod playlist;
 mod resource_monitor;

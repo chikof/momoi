@@ -1,5 +1,6 @@
 use anyhow::Result;
 use rayon::prelude::*;
+use crate::{log_and_continue, apply_overlay_or_warn};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
     delegate_compositor, delegate_layer, delegate_output, delegate_registry, delegate_shm,
@@ -213,46 +214,30 @@ fn run_wayland_blocking(
         }
 
         // Check for wallpaper commands
-        if let Ok(cmd) = wallpaper_rx.try_recv()
-            && let Err(e) = app_data.handle_wallpaper_command(cmd, &qh)
-        {
-            log::error!("Failed to handle wallpaper command: {}", e);
+        if let Ok(cmd) = wallpaper_rx.try_recv() {
+            log_and_continue!(app_data.handle_wallpaper_command(cmd, &qh), "handle wallpaper command");
         }
 
         // Update animated GIF frames
-        if let Err(e) = app_data.update_gif_frames(&qh) {
-            log::error!("Failed to update GIF frames: {}", e);
-        }
+        log_and_continue!(app_data.update_gif_frames(&qh), "update GIF frames");
 
         // Update video frames
-        if let Err(e) = app_data.update_video_frames(&qh) {
-            log::error!("Failed to update video frames: {}", e);
-        }
+        log_and_continue!(app_data.update_video_frames(&qh), "update video frames");
 
         // Update shader frames
-        if let Err(e) = app_data.update_shader_frames(&qh) {
-            log::error!("Failed to update shader frames: {}", e);
-        }
+        log_and_continue!(app_data.update_shader_frames(&qh), "update shader frames");
 
         // Update transitions
-        if let Err(e) = app_data.update_transitions(&qh) {
-            log::error!("Failed to update transitions: {}", e);
-        }
+        log_and_continue!(app_data.update_transitions(&qh), "update transitions");
 
         // Check playlist rotation
-        if let Err(e) = app_data.check_playlist_rotation(&qh) {
-            log::error!("Failed to check playlist rotation: {}", e);
-        }
+        log_and_continue!(app_data.check_playlist_rotation(&qh), "check playlist rotation");
 
         // Check schedule
-        if let Err(e) = app_data.check_schedule(&qh) {
-            log::error!("Failed to check schedule: {}", e);
-        }
+        log_and_continue!(app_data.check_schedule(&qh), "check schedule");
 
         // Update resource monitor
-        if let Err(e) = app_data.check_resources() {
-            log::error!("Failed to update resource monitor: {}", e);
-        }
+        log_and_continue!(app_data.check_resources(), "update resource monitor");
 
         // Flush the connection
         if let Err(e) = event_queue.flush() {
@@ -679,11 +664,14 @@ impl WallpaperDaemon {
             // No transition or transition setup failed - apply immediately
             // Apply overlay if present
             let mut final_data = argb_data;
-            if let Err(e) =
-                Self::apply_overlay_to_frame(output_data, &mut final_data, width, height)
-            {
-                log::warn!("Failed to apply overlay to image: {}", e);
-            }
+            apply_overlay_or_warn!(
+                Self::apply_overlay_to_frame,
+                output_data,
+                &mut final_data,
+                width,
+                height,
+                "image"
+            );
 
             // Create or update buffer
             let mut buffer = crate::buffer::ShmBuffer::new(&self.shm.wl_shm(), width, height, qh)?;
@@ -786,11 +774,14 @@ impl WallpaperDaemon {
 
             // Apply overlay if present
             let mut final_data = argb_data.to_vec();
-            if let Err(e) =
-                Self::apply_overlay_to_frame(output_data, &mut final_data, width, height)
-            {
-                log::warn!("Failed to apply overlay to GIF first frame: {}", e);
-            }
+            apply_overlay_or_warn!(
+                Self::apply_overlay_to_frame,
+                output_data,
+                &mut final_data,
+                width,
+                height,
+                "GIF first frame"
+            );
 
             // Create buffer and render
             let mut buffer = crate::buffer::ShmBuffer::new(&self.shm.wl_shm(), width, height, qh)?;
@@ -1222,14 +1213,14 @@ impl WallpaperDaemon {
 
             // Apply overlay if present
             let mut final_data = update.argb_data;
-            if let Err(e) = Self::apply_overlay_to_frame(
+            apply_overlay_or_warn!(
+                Self::apply_overlay_to_frame,
                 output_data,
                 &mut final_data,
                 update.width,
                 update.height,
-            ) {
-                log::warn!("Failed to apply overlay to GIF frame: {}", e);
-            }
+                "GIF frame"
+            );
 
             // Create new buffer and render (no scaling needed!)
             let mut buffer =
@@ -1418,14 +1409,14 @@ impl WallpaperDaemon {
 
             // Apply overlay if present
             let mut final_data = update.argb_data;
-            if let Err(e) = Self::apply_overlay_to_frame(
+            apply_overlay_or_warn!(
+                Self::apply_overlay_to_frame,
                 output_data,
                 &mut final_data,
                 update.width,
                 update.height,
-            ) {
-                log::warn!("Failed to apply overlay to video frame: {}", e);
-            }
+                "video frame"
+            );
 
             // Reuse existing buffer if possible, otherwise create new one
             if let Some(buffer) = &mut output_data.buffer {
@@ -1520,11 +1511,14 @@ impl WallpaperDaemon {
             let mut frame_data = shader_mgr.render_frame(width, height)?;
 
             // Apply overlay if present
-            if let Err(e) =
-                Self::apply_overlay_to_frame(output_data, &mut frame_data, width, height)
-            {
-                log::warn!("Failed to apply overlay to shader frame: {}", e);
-            }
+            apply_overlay_or_warn!(
+                Self::apply_overlay_to_frame,
+                output_data,
+                &mut frame_data,
+                width,
+                height,
+                "shader frame"
+            );
 
             // Update buffer
             if let Some(buffer) = &mut output_data.buffer {
@@ -1578,11 +1572,14 @@ impl WallpaperDaemon {
 
                     // Apply overlay if present
                     let mut final_data = pending_data.clone();
-                    if let Err(e) =
-                        Self::apply_overlay_to_frame(output_data, &mut final_data, width, height)
-                    {
-                        log::warn!("Failed to apply overlay after transition: {}", e);
-                    }
+                    apply_overlay_or_warn!(
+                        Self::apply_overlay_to_frame,
+                        output_data,
+                        &mut final_data,
+                        width,
+                        height,
+                        "frame after transition"
+                    );
 
                     // Update buffer with final wallpaper
                     if let Some(buffer) = &mut output_data.buffer {
