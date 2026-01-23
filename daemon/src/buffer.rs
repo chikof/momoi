@@ -35,13 +35,15 @@ impl ShmBuffer {
         qh: &QueueHandle<D>,
     ) -> anyhow::Result<Self>
     where
-        D: Dispatch<wl_shm_pool::WlShmPool, ()> + Dispatch<wl_buffer::WlBuffer, Arc<Mutex<BufferState>>> + 'static,
+        D: Dispatch<wl_shm_pool::WlShmPool, ()>
+            + Dispatch<wl_buffer::WlBuffer, Arc<Mutex<BufferState>>>
+            + 'static,
     {
         let stride = width * 4; // 4 bytes per pixel (ARGB8888)
         let size = stride * height;
 
         // Create a temporary file for shared memory
-        let mut file = tempfile::tempfile()?;
+        let file = tempfile::tempfile()?;
         file.set_len(size as u64)?;
 
         // Memory map the file
@@ -73,12 +75,12 @@ impl ShmBuffer {
             state,
         })
     }
-    
+
     /// Check if the buffer is safe to reuse (not busy)
     pub fn is_released(&self) -> bool {
         self.state.lock().map(|s| !s.busy).unwrap_or(false)
     }
-    
+
     /// Mark buffer as busy (attached to surface)
     pub fn mark_busy(&self) {
         if let Ok(mut state) = self.state.lock() {

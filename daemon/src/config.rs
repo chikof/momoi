@@ -1,11 +1,11 @@
+use crate::validate_enum;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use crate::validate_enum;
 
 /// Main configuration structure
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct Config {
     #[serde(default)]
     pub general: GeneralSettings,
@@ -410,20 +410,6 @@ impl Config {
     /// Get collection by name
     pub fn get_collection(&self, name: &str) -> Option<&Collection> {
         self.collection.iter().find(|c| c.name == name)
-    }
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            general: GeneralSettings::default(),
-            playlist: None,
-            schedule: Vec::new(),
-            output: Vec::new(),
-            collection: Vec::new(),
-            shader_preset: Vec::new(),
-            advanced: AdvancedSettings::default(),
-        }
     }
 }
 

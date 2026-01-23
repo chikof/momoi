@@ -1,4 +1,4 @@
-/// Custom macros for reducing code repetition in momoi
+//! Custom macros for reducing code repetition in momoi
 
 /// Log an error and continue execution (non-fatal error handling)
 ///
@@ -183,11 +183,12 @@ macro_rules! update_wallpaper_state {
                     $state.wallpapers.insert(name, $wallpaper_type.clone());
                 }
             } else {
-                $state.wallpapers.insert(filter.to_string(), $wallpaper_type);
+                $state
+                    .wallpapers
+                    .insert(filter.to_string(), $wallpaper_type);
             }
         } else {
-            let output_names: Vec<String> =
-                $state.outputs.iter().map(|o| o.name.clone()).collect();
+            let output_names: Vec<String> = $state.outputs.iter().map(|o| o.name.clone()).collect();
             for name in output_names {
                 $state.wallpapers.insert(name, $wallpaper_type.clone());
             }
@@ -237,7 +238,9 @@ macro_rules! parse_transition {
                 let mut rng = rand::thread_rng();
                 let dur_ms = $duration as u32;
                 match rng.gen_range(0..8) {
-                    0 => common::TransitionType::Fade { duration_ms: dur_ms },
+                    0 => common::TransitionType::Fade {
+                        duration_ms: dur_ms,
+                    },
                     1 => common::TransitionType::WipeLeft {
                         duration_ms: dur_ms,
                     },

@@ -1,7 +1,7 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use glob::glob;
+use rand::rng;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -143,7 +143,7 @@ impl PlaylistState {
 
     /// Generate a new shuffle order
     fn generate_shuffle_order(&mut self) {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         self.shuffle_order = (0..self.wallpapers.len()).collect();
         self.shuffle_order.shuffle(&mut rng);
         self.current_index = 0;

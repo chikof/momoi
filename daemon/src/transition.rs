@@ -48,8 +48,10 @@ impl From<&common::TransitionType> for TransitionType {
             common::TransitionType::Random { .. } => {
                 // Pick a random transition type
                 use rand::Rng;
-                let mut rng = rand::thread_rng();
-                let choice = rng.gen_range(0..8);
+
+                let mut rng = rand::rng();
+                let choice = rng.random_range(0..8);
+
                 match choice {
                     0 => Self::Fade,
                     1 => Self::WipeLeft,
@@ -332,7 +334,7 @@ impl Transition {
         let sin_a = angle_rad.sin();
 
         // Calculate the diagonal distance for normalization
-        let max_dist = (self.width as f32 * cos_a.abs() + self.height as f32 * sin_a.abs());
+        let max_dist = self.width as f32 * cos_a.abs() + self.height as f32 * sin_a.abs();
         let boundary = max_dist * progress;
 
         for y in 0..self.height as usize {
@@ -364,7 +366,7 @@ impl Transition {
         let center_y = self.height as f32 / 2.0;
 
         // Maximum distance from center to corner
-        let max_radius = ((center_x * center_x + center_y * center_y).sqrt());
+        let max_radius = (center_x * center_x + center_y * center_y).sqrt();
         let current_radius = max_radius * progress;
 
         for y in 0..self.height as usize {
@@ -398,7 +400,7 @@ impl Transition {
         let center_y = self.height as f32 / 2.0;
 
         // Maximum distance from center to corner
-        let max_radius = ((center_x * center_x + center_y * center_y).sqrt());
+        let max_radius = (center_x * center_x + center_y * center_y).sqrt();
         let current_radius = max_radius * (1.0 - progress);
 
         for y in 0..self.height as usize {

@@ -314,21 +314,27 @@ impl VideoManager {
 impl Drop for VideoManager {
     fn drop(&mut self) {
         log::info!("VideoManager::drop - Stopping video pipeline and cleaning up resources");
-        
+
         // Clear the appsink callbacks FIRST to prevent new frames from being processed
-        self.app_sink.set_callbacks(gst_app::AppSinkCallbacks::builder().build());
-        
+        self.app_sink
+            .set_callbacks(gst_app::AppSinkCallbacks::builder().build());
+
         // Stop pipeline and wait for state change to complete
         log::debug!("Setting pipeline state to Null...");
         match self.pipeline.set_state(gst::State::Null) {
             Ok(state_change) => {
                 log::debug!("Pipeline state change result: {:?}", state_change);
-                
+
                 // Wait for state change to actually complete (with timeout)
-                let (result, current, pending) = self.pipeline.state(Some(gst::ClockTime::from_seconds(2)));
+                let (result, current, pending) =
+                    self.pipeline.state(Some(gst::ClockTime::from_seconds(2)));
                 match result {
                     Ok(_) => {
-                        log::debug!("Pipeline final state: current={:?}, pending={:?}", current, pending);
+                        log::debug!(
+                            "Pipeline final state: current={:?}, pending={:?}",
+                            current,
+                            pending
+                        );
                     }
                     Err(e) => {
                         log::warn!("Failed to get pipeline final state: {:?}", e);
@@ -339,7 +345,7 @@ impl Drop for VideoManager {
                 log::warn!("Failed to set pipeline state to Null: {}", e);
             }
         }
-        
+
         // Get the bus and flush any pending messages to prevent leaks
         if let Some(bus) = self.pipeline.bus() {
             let mut drained = 0;
@@ -350,15 +356,18 @@ impl Drop for VideoManager {
                 log::debug!("Drained {} pending messages from bus", drained);
             }
         }
-        
+
         // Clear the current frame to free memory immediately
         if let Ok(mut frame) = self.current_frame.lock() {
             *frame = None;
         }
-        
-        log::info!("VideoManager::drop - Pipeline stopped, resources cleaned up (rendered: {}, dropped: {})", 
-                  self.frames_rendered, 
-                  self.frames_dropped.load(std::sync::atomic::Ordering::Relaxed));
+
+        log::info!(
+            "VideoManager::drop - Pipeline stopped, resources cleaned up (rendered: {}, dropped: {})",
+            self.frames_rendered,
+            self.frames_dropped
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
     }
 }
 

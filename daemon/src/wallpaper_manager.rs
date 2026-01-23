@@ -22,8 +22,8 @@ impl WallpaperManager {
 
     /// Check if a file is an animated GIF
     pub fn is_animated_gif(path: impl AsRef<Path>) -> Result<bool> {
-        use image::codecs::gif::GifDecoder;
         use image::AnimationDecoder;
+        use image::codecs::gif::GifDecoder;
 
         let path = path.as_ref();
 

@@ -96,26 +96,35 @@ fn run_wayland_blocking(
     wallpaper_rx: &mut mpsc::UnboundedReceiver<WallpaperCommand>,
 ) -> Result<()> {
     log::info!("run_wayland_blocking - Starting new Wayland connection");
-    
+
     // Initialize resource monitor with config from state
-    let resource_config = {
-        let state_lock = state.try_lock().expect("Failed to lock state");
-        if let Some(ref config) = state_lock.config {
-            crate::resource_monitor::ResourceConfig {
-                auto_battery_mode: config.advanced.auto_battery_mode,
-                enforce_memory_limits: config.advanced.enforce_memory_limits,
-                max_memory_mb: config.advanced.max_memory_mb,
-                cpu_threshold: config.advanced.cpu_threshold,
+    let resource_config = match state.try_lock() {
+        Ok(state_lock) => {
+            if let Some(ref config) = state_lock.config {
+                crate::resource_monitor::ResourceConfig {
+                    auto_battery_mode: config.advanced.auto_battery_mode,
+                    enforce_memory_limits: config.advanced.enforce_memory_limits,
+                    max_memory_mb: config.advanced.max_memory_mb,
+                    cpu_threshold: config.advanced.cpu_threshold,
+                }
+            } else {
+                crate::resource_monitor::ResourceConfig::default()
             }
-        } else {
+        }
+        Err(_) => {
+            log::warn!("State lock unavailable during reconnection; using defaults");
             crate::resource_monitor::ResourceConfig::default()
         }
     };
 
-    let resource_monitor = crate::resource_monitor::ResourceMonitor::new(resource_config);
+    let resource_monitor = crate::resource_monitor::ResourceMonitor::new(resource_config.clone());
     log::info!(
         "Resource monitor initialized (mode: {:?})",
         resource_monitor.mode()
+    );
+    log::debug!(
+        "Resource monitor configured for reconnections with max_memory_mb={}",
+        resource_config.max_memory_mb
     );
 
     // Initialize GPU renderer if available
@@ -278,13 +287,19 @@ fn run_wayland_blocking(
         std::thread::sleep(next_frame_delay);
     }
 
-    log::info!("run_wayland_blocking - Exiting, app_data will be dropped now (outputs: {}, video managers: {})",
-              app_data.outputs.len(),
-              app_data.outputs.iter().filter(|o| o.video_manager.is_some()).count());
-    
+    log::info!(
+        "run_wayland_blocking - Exiting, app_data will be dropped now (outputs: {}, video managers: {})",
+        app_data.outputs.len(),
+        app_data
+            .outputs
+            .iter()
+            .filter(|o| o.video_manager.is_some())
+            .count()
+    );
+
     // Explicitly drop app_data to ensure cleanup happens before we return
     drop(app_data);
-    
+
     log::info!("run_wayland_blocking - app_data dropped, resources cleaned up");
     Ok(())
 }
@@ -339,18 +354,18 @@ impl Drop for OutputData {
             self.gif_manager.is_some(),
             self.shader_manager.is_some()
         );
-        
+
         // Explicitly drop video manager first to ensure cleanup happens before other resources
         if let Some(vm) = self.video_manager.take() {
             log::debug!("Dropping video_manager from OutputData");
             drop(vm);
         }
-        
+
         // Clear other managers
         self.gif_manager = None;
         self.shader_manager = None;
         self.overlay_manager = None;
-        
+
         log::info!("OutputData::drop - Cleanup complete");
     }
 }
@@ -405,12 +420,12 @@ impl OutputData {
         const MAX_POOL_SIZE: usize = 3;
 
         let initial_size = self.buffer_pool.len();
-        
+
         if initial_size > MAX_POOL_SIZE {
             // Sort: released buffers first (they can be removed safely)
             // Then remove excess buffers starting with released ones
             let mut to_remove = initial_size - MAX_POOL_SIZE;
-            
+
             self.buffer_pool.retain(|buf| {
                 if to_remove > 0 && buf.is_released() {
                     to_remove -= 1;
@@ -419,7 +434,7 @@ impl OutputData {
                     true // Keep this buffer
                 }
             });
-            
+
             let removed = initial_size - self.buffer_pool.len();
             if removed > 0 {
                 log::debug!(
@@ -429,7 +444,7 @@ impl OutputData {
                     self.buffer_pool.len()
                 );
             }
-            
+
             // Warn if we still have too many (means they're all busy, possible leak)
             if self.buffer_pool.len() > MAX_POOL_SIZE {
                 log::warn!(
@@ -637,7 +652,11 @@ fn check_resources(app_data: &mut WallpaperDaemon) -> Result<()> {
     // Log buffer pool statistics to monitor for memory leaks
     for (idx, output) in app_data.outputs.iter().enumerate() {
         if output.buffer_pool.len() > 0 {
-            let busy_count = output.buffer_pool.iter().filter(|b| !b.is_released()).count();
+            let busy_count = output
+                .buffer_pool
+                .iter()
+                .filter(|b| !b.is_released())
+                .count();
             let released_count = output.buffer_pool.len() - busy_count;
             log::debug!(
                 "Output {}: buffer pool size = {} (busy: {}, released: {})",

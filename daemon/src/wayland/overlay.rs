@@ -1,6 +1,5 @@
 use anyhow::Result;
 use smithay_client_toolkit::output::OutputState;
-use wayland_client::protocol::wl_output;
 
 use super::OutputData;
 

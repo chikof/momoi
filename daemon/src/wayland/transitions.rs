@@ -45,13 +45,19 @@ pub(super) fn update_transitions(
                         buffer.write_image_data(&final_data)?;
                     } else {
                         // Wrong size, create new
-                        let mut new_buffer = crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
+                        let mut new_buffer = crate::buffer::ShmBuffer::new(
+                            &app_data.shm.wl_shm(),
+                            width,
+                            height,
+                            qh,
+                        )?;
                         new_buffer.write_image_data(&final_data)?;
                         output_data.buffer = Some(new_buffer);
                     }
                 } else {
                     // No buffer, create new
-                    let mut buffer = crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
+                    let mut buffer =
+                        crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
                     buffer.write_image_data(&final_data)?;
                     output_data.buffer = Some(buffer);
                 }
@@ -96,13 +102,15 @@ pub(super) fn update_transitions(
                 buffer.write_image_data(&blended_frame)?;
             } else {
                 // Wrong size, create new
-                let mut new_buffer = crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
+                let mut new_buffer =
+                    crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
                 new_buffer.write_image_data(&blended_frame)?;
                 output_data.buffer = Some(new_buffer);
             }
         } else {
             // No buffer, create new
-            let mut buffer = crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
+            let mut buffer =
+                crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
             buffer.write_image_data(&blended_frame)?;
             output_data.buffer = Some(buffer);
         }
