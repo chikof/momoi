@@ -56,8 +56,13 @@ impl VideoManager {
         scale_mode: common::ScaleMode,
         muted: bool,
     ) -> Result<Self> {
-        // Initialize GStreamer
-        gst::init().context("Failed to initialize GStreamer")?;
+        // Initialize GStreamer (safe to call multiple times, it's idempotent)
+        // But we should really call this once at startup
+        static GSTREAMER_INITIALIZED: std::sync::Once = std::sync::Once::new();
+        GSTREAMER_INITIALIZED.call_once(|| {
+            gst::init().expect("Failed to initialize GStreamer");
+            log::info!("GStreamer initialized");
+        });
 
         let path = path.as_ref();
         log::info!("Loading video: {}", path.display());
@@ -306,7 +311,15 @@ impl VideoManager {
 impl Drop for VideoManager {
     fn drop(&mut self) {
         log::debug!("Stopping video pipeline");
+        // Stop pipeline and wait for state change
         let _ = self.pipeline.set_state(gst::State::Null);
+        // Get the bus and flush any pending messages to prevent leaks
+        if let Some(bus) = self.pipeline.bus() {
+            while bus.pop().is_some() {
+                // Drain all messages
+            }
+        }
+        log::debug!("Video pipeline stopped and cleaned up");
     }
 }
 
