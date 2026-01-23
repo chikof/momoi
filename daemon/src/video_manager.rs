@@ -215,8 +215,9 @@ impl VideoManager {
         }
 
         // Check for EOS (end of stream) for looping
+        // IMPORTANT: Drain ALL messages from the bus to prevent memory leak
         if let Some(bus) = self.pipeline.bus() {
-            if let Some(msg) = bus.pop() {
+            while let Some(msg) = bus.pop() {
                 match msg.view() {
                     gst::MessageView::Eos(_) => {
                         if self.should_loop {
@@ -238,7 +239,9 @@ impl VideoManager {
                         );
                         self.is_playing = false;
                     }
-                    _ => {}
+                    _ => {
+                        // Drain other messages to prevent memory leak
+                    }
                 }
             }
         }
