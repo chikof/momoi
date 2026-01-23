@@ -52,6 +52,12 @@ fn run_wayland_with_reconnect(
                 if error_msg.contains("Broken pipe") || error_msg.contains("broken pipe") {
                     retry_count += 1;
 
+                    log::warn!(
+                        "Wayland compositor disconnected (broken pipe) - attempt {}/{}. Previous connection resources should be dropped now.",
+                        retry_count,
+                        max_retries
+                    );
+
                     if retry_count > max_retries {
                         log::error!(
                             "Failed to reconnect after {} attempts. Giving up.",
@@ -61,13 +67,13 @@ fn run_wayland_with_reconnect(
                     }
 
                     log::warn!(
-                        "Wayland compositor disconnected (attempt {}/{}). Reconnecting in {}ms...",
+                        "Reconnecting in {}ms (attempt {}/{})...",
+                        backoff_ms,
                         retry_count,
-                        max_retries,
-                        backoff_ms
+                        max_retries
                     );
 
-                    // Wait before retrying
+                    // Wait before retrying - this also gives GStreamer time to clean up resources
                     std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
 
                     // Exponential backoff, max 10 seconds
@@ -89,6 +95,8 @@ fn run_wayland_blocking(
     state: Arc<Mutex<DaemonState>>,
     wallpaper_rx: &mut mpsc::UnboundedReceiver<WallpaperCommand>,
 ) -> Result<()> {
+    log::info!("run_wayland_blocking - Starting new Wayland connection");
+    
     // Initialize resource monitor with config from state
     let resource_config = {
         let state_lock = state.try_lock().expect("Failed to lock state");
@@ -270,6 +278,14 @@ fn run_wayland_blocking(
         std::thread::sleep(next_frame_delay);
     }
 
+    log::info!("run_wayland_blocking - Exiting, app_data will be dropped now (outputs: {}, video managers: {})",
+              app_data.outputs.len(),
+              app_data.outputs.iter().filter(|o| o.video_manager.is_some()).count());
+    
+    // Explicitly drop app_data to ensure cleanup happens before we return
+    drop(app_data);
+    
+    log::info!("run_wayland_blocking - app_data dropped, resources cleaned up");
     Ok(())
 }
 
@@ -310,6 +326,33 @@ pub struct OutputData {
     /// GPU renderer for accelerated rendering (optional)
     #[cfg(feature = "gpu")]
     pub(super) gpu_renderer: Option<std::sync::Arc<crate::gpu::GpuRenderer>>,
+}
+
+impl Drop for OutputData {
+    fn drop(&mut self) {
+        log::info!(
+            "OutputData::drop - Cleaning up output ({}x{}, buffer_pool: {}, video: {}, gif: {}, shader: {})",
+            self.width,
+            self.height,
+            self.buffer_pool.len(),
+            self.video_manager.is_some(),
+            self.gif_manager.is_some(),
+            self.shader_manager.is_some()
+        );
+        
+        // Explicitly drop video manager first to ensure cleanup happens before other resources
+        if let Some(vm) = self.video_manager.take() {
+            log::debug!("Dropping video_manager from OutputData");
+            drop(vm);
+        }
+        
+        // Clear other managers
+        self.gif_manager = None;
+        self.shader_manager = None;
+        self.overlay_manager = None;
+        
+        log::info!("OutputData::drop - Cleanup complete");
+    }
 }
 
 impl OutputData {
