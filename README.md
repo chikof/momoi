@@ -21,11 +21,11 @@ Welcome to Momoi!
 First of all, if I were you, I wouldn't consider using this in the first place.
 I'd say that this is not usable at all, I mean I use it myself just because I have to test it.
 
-Momoi is an advanced Wayland wallpaper daemon with GPU-accelerated rendering, supporting images, animated GIFs, videos, procedural shaders, and post-processing effects. Built for performance and flexibility, it provides smooth transitions, multi-monitor support, and runtime control.
+Momoi is an advanced Wayland wallpaper daemon with GPU-accelerated rendering, supporting images, animated GIFs (converted to WebM for efficiency), videos, procedural shaders, and post-processing effects. Built for performance and flexibility, it provides smooth transitions, multi-monitor support, and runtime control.
 
 ## ✨ Features
 
-- **Media Support**: PNG, JPEG, WebP, SVG, GIF, MP4, WebM, MKV, and more
+- **Media Support**: PNG, JPEG, WebP, SVG, GIF (auto-converted to WebM), MP4, WebM, MKV, and more
 - **GPU Shaders**: 7 customizable procedural shaders (plasma, waves, starfield, matrix, etc.)
 - **Post-Processing**: 7 overlay effects (vignette, scanlines, CRT, chromatic aberration, etc.)
 - **Smooth Transitions**: 10 GPU-accelerated transition types (fade, wipes, center, outer)

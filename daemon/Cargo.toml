@@ -22,7 +22,7 @@ wayland-protocols-wlr = { workspace = true }
 image = { workspace = true, features = [
   "png",
   "jpeg",
-  "gif",
+  "gif",  # Still needed for GIF detection before conversion
   "webp",
   "bmp",
   "tiff",

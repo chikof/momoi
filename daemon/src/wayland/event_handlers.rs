@@ -217,7 +217,9 @@ impl ShmHandler for WallpaperDaemon {
 }
 
 // Implement Dispatch for wl_buffer to handle release events
-impl Dispatch<wl_buffer::WlBuffer, std::sync::Arc<std::sync::Mutex<crate::buffer::BufferState>>> for WallpaperDaemon {
+impl Dispatch<wl_buffer::WlBuffer, std::sync::Arc<std::sync::Mutex<crate::buffer::BufferState>>>
+    for WallpaperDaemon
+{
     fn event(
         _state: &mut Self,
         _proxy: &wl_buffer::WlBuffer,

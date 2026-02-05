@@ -59,12 +59,15 @@ impl Default for GeneralSettings {
 fn default_log_level() -> String {
     "info".to_string()
 }
+
 fn default_transition() -> String {
     "fade".to_string()
 }
+
 fn default_duration() -> u64 {
     500
 }
+
 fn default_scale() -> String {
     "fill".to_string()
 }
@@ -97,6 +100,7 @@ pub struct PlaylistSettings {
 fn default_interval() -> u64 {
     300
 } // 5 minutes
+
 fn default_extensions() -> Vec<String> {
     vec![
         "jpg".to_string(),
@@ -253,6 +257,22 @@ pub struct AdvancedSettings {
 
     #[serde(default = "default_cpu_threshold")]
     pub cpu_threshold: f32,
+
+    // Reconnection settings
+    #[serde(default = "default_false")]
+    pub enable_reconnection: bool,
+
+    #[serde(default = "default_max_reconnection_retries")]
+    pub max_reconnection_retries: u32,
+
+    #[serde(default = "default_initial_reconnection_backoff")]
+    pub initial_reconnection_backoff_ms: u64,
+
+    #[serde(default = "default_max_reconnection_backoff")]
+    pub max_reconnection_backoff_ms: u64,
+
+    #[serde(default = "default_max_video_fps")]
+    pub max_video_fps: u32,
 }
 
 impl Default for AdvancedSettings {
@@ -269,6 +289,11 @@ impl Default for AdvancedSettings {
             enforce_memory_limits: true,
             max_memory_mb: default_memory_limit(),
             cpu_threshold: default_cpu_threshold(),
+            enable_reconnection: default_false(),
+            max_reconnection_retries: default_max_reconnection_retries(),
+            initial_reconnection_backoff_ms: default_initial_reconnection_backoff(),
+            max_reconnection_backoff_ms: default_max_reconnection_backoff(),
+            max_video_fps: default_max_video_fps(),
         }
     }
 }
@@ -276,17 +301,41 @@ impl Default for AdvancedSettings {
 fn default_true() -> bool {
     true
 }
+
+fn default_false() -> bool {
+    false
+}
+
 fn default_max_fps() -> u32 {
     60
 }
+
 fn default_performance_mode() -> String {
     "balanced".to_string()
 }
+
 fn default_memory_limit() -> usize {
     300
 }
+
 fn default_cpu_threshold() -> f32 {
     80.0
+}
+
+fn default_max_reconnection_retries() -> u32 {
+    10
+}
+
+fn default_initial_reconnection_backoff() -> u64 {
+    1000
+}
+
+fn default_max_reconnection_backoff() -> u64 {
+    10000
+}
+
+pub fn default_max_video_fps() -> u32 {
+    15
 }
 
 impl Config {

@@ -20,31 +20,16 @@ impl WallpaperManager {
         }
     }
 
-    /// Check if a file is an animated GIF
-    pub fn is_animated_gif(path: impl AsRef<Path>) -> Result<bool> {
-        use image::AnimationDecoder;
-        use image::codecs::gif::GifDecoder;
-
+    /// Check if a file is a GIF (will be converted to video)
+    pub fn is_gif(path: impl AsRef<Path>) -> bool {
         let path = path.as_ref();
 
-        // Check extension first for quick rejection
+        // Check extension
         if let Some(ext) = path.extension() {
-            if ext.to_string_lossy().to_lowercase() != "gif" {
-                return Ok(false);
-            }
+            ext.to_string_lossy().to_lowercase() == "gif"
         } else {
-            return Ok(false);
+            false
         }
-
-        // Open file and check frame count
-        let file = std::fs::File::open(path)?;
-        let reader = std::io::BufReader::new(file);
-        let decoder = GifDecoder::new(reader)?;
-        let frames = decoder.into_frames();
-
-        // If it has more than 1 frame, it's animated
-        let frame_count = frames.count();
-        Ok(frame_count > 1)
     }
 
     /// Check if a file is a video

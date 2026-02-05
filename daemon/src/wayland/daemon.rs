@@ -26,9 +26,31 @@ fn run_wayland_with_reconnect(
     state: Arc<Mutex<DaemonState>>,
     mut wallpaper_rx: mpsc::UnboundedReceiver<WallpaperCommand>,
 ) -> Result<()> {
+    // Get reconnection settings from config
+    let (enable_reconnection, max_retries, initial_backoff, max_backoff) = {
+        if let Ok(state_guard) = state.try_lock() {
+            if let Some(ref config) = state_guard.config {
+                (
+                    config.advanced.enable_reconnection,
+                    config.advanced.max_reconnection_retries,
+                    config.advanced.initial_reconnection_backoff_ms,
+                    config.advanced.max_reconnection_backoff_ms,
+                )
+            } else {
+                (true, 10, 1000, 10000)
+            }
+        } else {
+            (true, 10, 1000, 10000)
+        }
+    };
+
+    if !enable_reconnection {
+        log::info!("Reconnection disabled, running single connection");
+        return run_wayland_blocking(state, &mut wallpaper_rx);
+    }
+
     let mut retry_count = 0u32;
-    let max_retries = 10;
-    let mut backoff_ms = 1000u64; // Start with 1 second
+    let mut backoff_ms = initial_backoff;
 
     loop {
         // Check if we should exit
@@ -76,8 +98,8 @@ fn run_wayland_with_reconnect(
                     // Wait before retrying - this also gives GStreamer time to clean up resources
                     std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
 
-                    // Exponential backoff, max 10 seconds
-                    backoff_ms = std::cmp::min(backoff_ms * 2, 10000);
+                    // Exponential backoff
+                    backoff_ms = std::cmp::min(backoff_ms * 2, max_backoff);
 
                     // Try again
                     continue;
@@ -222,13 +244,7 @@ fn run_wayland_blocking(
             );
         }
 
-        // Update animated GIF frames
-        log_and_continue!(
-            super::frame_updates::update_gif_frames(&mut app_data, &qh),
-            "update GIF frames"
-        );
-
-        // Update video frames
+        // Update video frames (GIFs are converted to video)
         log_and_continue!(
             super::frame_updates::update_video_frames(&mut app_data, &qh),
             "update video frames"
@@ -281,6 +297,11 @@ fn run_wayland_blocking(
             break;
         }
 
+        // Clean up released buffers from pools to prevent memory leaks
+        for output in &mut app_data.outputs {
+            output.cleanup_buffer_pool();
+        }
+
         // Adaptive sleep: sleep based on next expected frame time
         // Check GIF and video managers for their next frame times
         let next_frame_delay = get_next_frame_delay(&app_data);
@@ -330,7 +351,6 @@ pub struct OutputData {
     pub(super) height: u32,
     pub(super) scale: f64,
     pub(super) configured: bool,
-    pub(super) gif_manager: Option<crate::gif_manager::GifManager>,
     pub(super) video_manager: Option<crate::video_manager::VideoManager>,
     pub(super) shader_manager: Option<crate::shader_manager::ShaderManager>,
     pub(super) overlay_manager: Option<crate::overlay_shader::OverlayManager>,
@@ -346,12 +366,11 @@ pub struct OutputData {
 impl Drop for OutputData {
     fn drop(&mut self) {
         log::info!(
-            "OutputData::drop - Cleaning up output ({}x{}, buffer_pool: {}, video: {}, gif: {}, shader: {})",
+            "OutputData::drop - Cleaning up output ({}x{}, buffer_pool: {}, video: {}, shader: {})",
             self.width,
             self.height,
             self.buffer_pool.len(),
             self.video_manager.is_some(),
-            self.gif_manager.is_some(),
             self.shader_manager.is_some()
         );
 
@@ -362,7 +381,6 @@ impl Drop for OutputData {
         }
 
         // Clear other managers
-        self.gif_manager = None;
         self.shader_manager = None;
         self.overlay_manager = None;
 
@@ -483,17 +501,7 @@ fn get_next_frame_delay(app_data: &WallpaperDaemon) -> std::time::Duration {
         }
     }
 
-    // Check GIF managers for next frame time
-    for output_data in &app_data.outputs {
-        if let Some(gif_manager) = &output_data.gif_manager {
-            let delay = gif_manager.time_until_next_frame();
-            if delay < min_delay {
-                min_delay = delay;
-            }
-        }
-    }
-
-    // Videos produce frames asynchronously, poll at their actual frame rate
+    // Videos (including converted GIFs) produce frames asynchronously, poll at their actual frame rate
     for output_data in &app_data.outputs {
         if let Some(video_manager) = &output_data.video_manager {
             // Poll at the video's actual frame rate to avoid wasting CPU
@@ -651,7 +659,7 @@ fn check_resources(app_data: &mut WallpaperDaemon) -> Result<()> {
 
     // Log buffer pool statistics to monitor for memory leaks
     for (idx, output) in app_data.outputs.iter().enumerate() {
-        if output.buffer_pool.len() > 0 {
+        if !output.buffer_pool.is_empty() {
             let busy_count = output
                 .buffer_pool
                 .iter()

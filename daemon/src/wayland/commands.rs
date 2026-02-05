@@ -3,6 +3,7 @@ use smithay_client_toolkit::shell::WaylandSurface;
 use wayland_client::QueueHandle;
 
 use super::WallpaperDaemon;
+use crate::config::default_max_video_fps;
 use crate::{WallpaperCommand, apply_overlay_or_warn};
 
 /// Main command handler dispatcher
@@ -61,18 +62,25 @@ fn set_image_wallpaper(
         transition
     );
 
+    // Check if this is a GIF (convert to video)
+    if crate::wallpaper_manager::WallpaperManager::is_gif(path) {
+        log::info!("Detected GIF file, converting to WebM for efficient playback");
+        let webm_path = crate::gif_converter::convert_gif_to_webm(path)?;
+        log::info!("Using converted WebM: {}", webm_path.display());
+        return set_video_wallpaper(
+            app_data,
+            webm_path.to_str().unwrap(),
+            output_filter,
+            scale,
+            transition,
+            qh,
+        );
+    }
+
     // Check if this is a video
     if crate::wallpaper_manager::WallpaperManager::is_video(path) {
         log::info!("Detected video file, loading with VideoManager");
         return set_video_wallpaper(app_data, path, output_filter, scale, transition, qh);
-    }
-
-    // Check if this is an animated GIF
-    let is_animated = crate::wallpaper_manager::WallpaperManager::is_animated_gif(path)?;
-
-    if is_animated {
-        log::info!("Detected animated GIF, loading with GifManager");
-        return set_animated_gif(app_data, path, output_filter, scale, transition, qh);
     }
 
     // Load and clone the image (so we don't hold a borrow to wallpaper_manager)
@@ -178,8 +186,7 @@ fn set_image_wallpaper(
             }
         };
 
-        // Clear any GIF/video managers (can't have multiple types)
-        output_data.gif_manager = None;
+        // Clear any video managers (can't have multiple types)
         output_data.video_manager = None;
 
         // Handle transition if requested
@@ -263,128 +270,6 @@ fn set_image_wallpaper(
                     state.outputs.iter().map(|o| o.name.clone()).collect();
                 for name in output_names {
                     state.wallpapers.insert(name, wallpaper_type.clone());
-                }
-            } else {
-                state.wallpapers.insert(filter.to_string(), wallpaper_type);
-            }
-        } else {
-            // Apply to all outputs
-            let output_names: Vec<String> = state.outputs.iter().map(|o| o.name.clone()).collect();
-            for name in output_names {
-                state.wallpapers.insert(name, wallpaper_type.clone());
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn set_animated_gif(
-    app_data: &mut WallpaperDaemon,
-    path: &str,
-    output_filter: Option<&str>,
-    scale: common::ScaleMode,
-    _transition: Option<common::TransitionType>,
-    qh: &QueueHandle<WallpaperDaemon>,
-) -> Result<()> {
-    // TODO: Implement transitions for GIFs
-    // For now, we just apply immediately
-    // Apply to matching outputs
-    for output_data in &mut app_data.outputs {
-        if !output_data.configured {
-            continue;
-        }
-
-        // Check if this output matches the filter
-        if let Some(filter) = output_filter
-            && let Some(info) = app_data.output_state.info(&output_data.output)
-            && let Some(name) = &info.name
-            && name != filter
-            && filter != "all"
-        {
-            continue;
-        }
-
-        let width = output_data.width;
-        let height = output_data.height;
-
-        if width == 0 || height == 0 {
-            continue;
-        }
-
-        // Load GIF manager with pre-scaling
-        let gif_manager = crate::gif_manager::GifManager::load(
-            path,
-            width,
-            height,
-            scale,
-            &app_data.wallpaper_manager,
-            #[cfg(feature = "gpu")]
-            output_data.gpu_renderer.as_ref().map(|arc| arc.as_ref()),
-        )?;
-        log::info!(
-            "Loaded animated GIF with {} frames for output {}x{}",
-            gif_manager.frame_count(),
-            width,
-            height
-        );
-
-        // Get the first frame data (already scaled and converted)
-        let argb_data = gif_manager.current_frame_data();
-
-        // Apply overlay if present
-        let mut final_data = argb_data.to_vec();
-        apply_overlay_or_warn!(
-            super::overlay::apply_overlay_to_frame,
-            output_data,
-            &mut final_data,
-            width,
-            height,
-            "GIF first frame"
-        );
-
-        // Create buffer and render
-        let mut buffer = crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
-        buffer.write_image_data(&final_data)?;
-
-        // Attach and commit
-        if let Some(layer_surface) = &output_data.layer_surface {
-            layer_surface
-                .wl_surface()
-                .attach(Some(buffer.buffer()), 0, 0);
-            layer_surface
-                .wl_surface()
-                .damage_buffer(0, 0, width as i32, height as i32);
-            layer_surface.wl_surface().commit();
-        }
-
-        // Mark buffer as busy (compositor is using it)
-        // Just replace buffer directly
-
-        // Swap buffer (moves old buffer to pool)
-        output_data.buffer = Some(buffer);
-
-        output_data.gif_manager = Some(gif_manager);
-
-        log::info!("Applied animated GIF to output {}x{}", width, height);
-    }
-
-    // Update shared state
-    if let Ok(mut state) = app_data.state.try_lock() {
-        let wallpaper_type = common::WallpaperType::Image(path.to_string());
-        if let Some(filter) = output_filter {
-            if let Some(info) = app_data.output_state.info(
-                &app_data
-                    .outputs
-                    .iter()
-                    .find(|o| o.configured)
-                    .unwrap()
-                    .output,
-            ) {
-                if let Some(name) = &info.name {
-                    state
-                        .wallpapers
-                        .insert(name.clone(), wallpaper_type.clone());
                 }
             } else {
                 state.wallpapers.insert(filter.to_string(), wallpaper_type);
@@ -556,8 +441,7 @@ fn set_shader_wallpaper(
             continue;
         }
 
-        // Clear any existing video/gif managers
-        output_data.gif_manager = None;
+        // Clear any existing video managers
         output_data.video_manager = None;
 
         // Create shader manager for this output
@@ -644,12 +528,22 @@ fn set_video_wallpaper(
             continue;
         }
 
-        // Clear any GIF manager (can't have both)
-        output_data.gif_manager = None;
+        // Clear any video manager (can't have both video and shader)
+
+        // Get target FPS from config
+        let target_fps = if let Ok(state_guard) = app_data.state.try_lock() {
+            state_guard
+                .config
+                .as_ref()
+                .map(|c| c.advanced.max_video_fps)
+                .unwrap_or(default_max_video_fps())
+        } else {
+            default_max_video_fps()
+        };
 
         // Load video with VideoManager
         let mut video_manager = crate::video_manager::VideoManager::load(
-            path, width, height, scale, true, // muted by default
+            path, width, height, scale, true, target_fps, // muted by default
         )?;
 
         // Start playback

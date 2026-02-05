@@ -92,7 +92,7 @@ impl From<serde_json::Error> for WallpaperError {
 pub enum Command {
     /// Set wallpaper from an image or video file.
     ///
-    /// Supported formats: PNG, JPEG, WebP, GIF, SVG, MP4, WebM
+    /// Supported formats: PNG, JPEG, WebP, GIF (converted to WebM), SVG, MP4, WebM
     SetWallpaper {
         /// Path to the wallpaper file (must be absolute)
         path: String,

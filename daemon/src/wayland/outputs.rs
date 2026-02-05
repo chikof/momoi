@@ -140,7 +140,6 @@ pub(super) fn create_layer_surface(
         height: 0,
         scale: 1.0,
         configured: false,
-        gif_manager: None,
         video_manager: None,
         shader_manager: None,
         overlay_manager: None,

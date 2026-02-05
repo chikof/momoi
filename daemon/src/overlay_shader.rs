@@ -1,6 +1,6 @@
+use crate::log_params_once;
 use anyhow::Result;
 use std::time::Instant;
-use crate::log_params_once;
 
 /// Overlay shader types that render on top of existing wallpapers
 #[derive(Debug, Clone, Copy, PartialEq)]

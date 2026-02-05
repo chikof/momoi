@@ -1,6 +1,6 @@
 mod buffer;
 mod config;
-mod gif_manager;
+mod gif_converter;
 mod ipc_server;
 mod macros;
 mod overlay_shader;
@@ -270,7 +270,6 @@ pub enum WallpaperCommand {
 #[derive(Debug, Clone)]
 pub enum WallpaperContent {
     Static,
-    AnimatedGif { frame_count: usize },
     Video { duration_secs: Option<u64> },
     Shader { shader_name: String },
 }

@@ -30,11 +30,15 @@ pub struct VideoManager {
     new_frame_available: Arc<AtomicBool>,
     /// Last frame update time
     last_frame_time: Instant,
+    /// Last render time for FPS limiting
+    last_render_time: Instant,
     /// Target framerate (for frame timing)
     frame_duration: Duration,
     /// Video dimensions
     width: u32,
     height: u32,
+    /// Target FPS limit
+    target_fps: u32,
     /// Whether video is playing
     is_playing: bool,
     /// Loop the video
@@ -55,6 +59,7 @@ impl VideoManager {
         target_height: u32,
         scale_mode: common::ScaleMode,
         muted: bool,
+        target_fps: u32,
     ) -> Result<Self> {
         // Initialize GStreamer (safe to call multiple times, it's idempotent)
         // But we should really call this once at startup
@@ -69,8 +74,9 @@ impl VideoManager {
 
         // Create GStreamer pipeline
         // Pipeline: filesrc -> decodebin -> videoconvert -> videoscale -> appsink
+        // Disable buffering to reduce thread usage
         let pipeline_str = format!(
-            "filesrc location={} ! decodebin ! videoconvert ! videoscale ! video/x-raw,format=BGRA,width={},height={} ! appsink name=sink",
+            "filesrc location={} ! decodebin use-buffering=false ! videoconvert ! videoscale ! video/x-raw,format=BGRA,width={},height={} ! appsink name=sink",
             path.display(),
             target_width,
             target_height
@@ -149,6 +155,7 @@ impl VideoManager {
             current_frame,
             new_frame_available: new_frame_flag,
             last_frame_time: Instant::now(),
+            last_render_time: Instant::now(),
             frame_duration,
             width: target_width,
             height: target_height,
@@ -157,6 +164,7 @@ impl VideoManager {
             frames_rendered: 0,
             frames_dropped,
             detected_fps: None,
+            target_fps,
         })
     }
 
@@ -249,7 +257,15 @@ impl VideoManager {
         // Check if we have a new frame available using atomic flag
         // This avoids rendering the same frame multiple times
         if self.new_frame_available.swap(false, Ordering::Acquire) {
+            // Check FPS limit
+            let min_frame_time = Duration::from_secs_f64(1.0 / self.target_fps as f64);
+            if self.last_render_time.elapsed() < min_frame_time {
+                // Too soon, drop this frame to limit FPS
+                return false;
+            }
+
             self.last_frame_time = Instant::now();
+            self.last_render_time = Instant::now();
             self.frames_rendered += 1;
 
             // Log statistics every 600 frames (~20 seconds at 30fps, ~10 seconds at 60fps)
@@ -383,6 +399,7 @@ impl VideoManager {
         _target_height: u32,
         _scale_mode: common::ScaleMode,
         _muted: bool,
+        _target_fps: u32,
     ) -> anyhow::Result<Self> {
         anyhow::bail!("Video support not compiled in. Build with --features video")
     }
