@@ -431,6 +431,7 @@ pub enum OverlayEffect {
 
 impl OverlayEffect {
     /// Parse overlay effect name from string
+    #[allow(clippy::should_implement_trait)] // Custom parsing logic, not std::str::FromStr
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "vignette" => Some(Self::Vignette),
@@ -461,24 +462,19 @@ impl OverlayEffect {
 }
 
 /// Image scaling/fitting mode
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
 pub enum ScaleMode {
     /// Center image without scaling
     Center,
     /// Scale to fill entire output (may crop)
     Fill,
     /// Scale to fit within output (may have letterboxing)
+    #[default]
     Fit,
     /// Stretch to fill output (may distort)
     Stretch,
     /// Tile the image
     Tile,
-}
-
-impl Default for ScaleMode {
-    fn default() -> Self {
-        Self::Fill
-    }
 }
 
 /// IPC socket path helper

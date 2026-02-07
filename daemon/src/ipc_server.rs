@@ -266,7 +266,7 @@ async fn handle_command(
             let mut state = state.lock().await;
 
             // Get transition config first
-            let (transition, duration) = if let Some(ref config) = state.config {
+            let (_transition, duration) = if let Some(ref config) = state.config {
                 if let Some(ref playlist_cfg) = config.playlist {
                     (
                         playlist_cfg.transition.clone(),
@@ -321,7 +321,7 @@ async fn handle_command(
             let mut state = state.lock().await;
 
             // Get transition config first
-            let (transition, duration) = if let Some(ref config) = state.config {
+            let (_transition, duration) = if let Some(ref config) = state.config {
                 if let Some(ref playlist_cfg) = config.playlist {
                     (
                         playlist_cfg.transition.clone(),
@@ -400,7 +400,7 @@ async fn handle_command(
             }
         }
 
-        Command::SetPerformanceMode { mode } => Response::Error(WallpaperError::Ipc(
+        Command::SetPerformanceMode { mode: _ } => Response::Error(WallpaperError::Ipc(
             "Setting performance mode not yet implemented (use config file)".to_string(),
         )),
     }

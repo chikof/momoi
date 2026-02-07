@@ -51,14 +51,9 @@ impl GpuTexture {
 
         // Upload data to GPU
         queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
+            texture.as_image_copy(),
             data,
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width * 4),
                 rows_per_image: Some(height),
@@ -98,8 +93,92 @@ impl GpuTexture {
         })
     }
 
+    /// Create a new GPU texture from BGRA8 video data (GStreamer format)
+    /// This is optimized for video - uploads BGRA directly without CPU conversion
+    pub fn from_bgra(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bind_group_layout: &wgpu::BindGroupLayout,
+        sampler: &wgpu::Sampler,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> Result<Self> {
+        // Validate data size
+        let expected_size = (width * height * 4) as usize;
+        if data.len() != expected_size {
+            anyhow::bail!(
+                "Invalid texture data size: expected {} bytes ({}x{} BGRA), got {} bytes",
+                expected_size,
+                width,
+                height,
+                data.len()
+            );
+        }
+
+        // Create texture with BGRA format (native for video)
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("GPU Video Texture (BGRA)"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Bgra8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+
+        // Upload BGRA data directly to GPU (no CPU conversion needed!)
+        queue.write_texture(
+            texture.as_image_copy(),
+            data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(width * 4),
+                rows_per_image: Some(height),
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        // Create texture view
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+
+        // Create bind group for shader access
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("GPU Video Bind Group"),
+            layout: bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        });
+
+        Ok(Self {
+            texture,
+            view,
+            bind_group,
+            width,
+            height,
+        })
+    }
+
     /// Create a new GPU texture from ARGB8 image data (Wayland format)
     /// Converts ARGB -> RGBA for GPU upload
+    #[allow(dead_code)] // Alternative API for ARGB texture creation
     pub fn from_argb(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -204,15 +283,10 @@ impl GpuTexture {
         });
 
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
-                texture: &self.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::ImageCopyBuffer {
+            self.texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
                 buffer: &staging_buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(padded_bytes_per_row),
                     rows_per_image: Some(self.height),
@@ -234,7 +308,11 @@ impl GpuTexture {
             tx.send(result).unwrap();
         });
 
-        device.poll(wgpu::Maintain::Wait);
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+
         rx.recv()
             .context("Failed to receive buffer mapping result")?
             .context("Failed to map GPU buffer")?;

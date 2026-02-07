@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{Local, NaiveTime, Timelike};
+use chrono::{Local, NaiveTime};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 

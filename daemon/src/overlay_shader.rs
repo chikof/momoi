@@ -76,6 +76,7 @@ impl OverlayShader {
     }
 
     /// Convert to common::OverlayEffect for GPU rendering
+    #[allow(dead_code)] // Used for GPU overlay feature integration
     pub fn to_common_effect(&self) -> common::OverlayEffect {
         match self {
             OverlayShader::Vignette { .. } => common::OverlayEffect::Vignette,
@@ -89,6 +90,7 @@ impl OverlayShader {
     }
 
     /// Convert to common::OverlayParams for GPU rendering
+    #[allow(dead_code)] // Used for GPU overlay feature integration
     pub fn to_common_params(&self) -> common::OverlayParams {
         match self {
             OverlayShader::Vignette { strength } => common::OverlayParams {
@@ -171,6 +173,7 @@ impl OverlayManager {
     }
 
     /// Get elapsed time since overlay was created
+    #[allow(dead_code)] // Part of public API for time-based overlay effects
     pub fn elapsed_time(&self) -> f32 {
         self.time.elapsed().as_secs_f32()
     }

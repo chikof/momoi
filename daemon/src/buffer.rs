@@ -82,6 +82,7 @@ impl ShmBuffer {
     }
 
     /// Mark buffer as busy (attached to surface)
+    #[allow(dead_code)] // Part of public API, used for explicit buffer management
     pub fn mark_busy(&self) {
         if let Ok(mut state) = self.state.lock() {
             state.busy = true;

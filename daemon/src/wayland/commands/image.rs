@@ -163,9 +163,6 @@ pub(in crate::wayland) fn set_image_wallpaper(
             }
         };
 
-        // Clear any video managers (can't have multiple types)
-        output_data.video_manager = None;
-
         // Handle transition if requested
         if let Some(ref trans_config) = transition
             && trans_config.duration_ms() > 0

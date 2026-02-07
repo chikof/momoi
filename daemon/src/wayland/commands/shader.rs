@@ -16,7 +16,7 @@ pub(in crate::wayland) fn set_shader_wallpaper(
     output_filter: Option<&str>,
     _transition: Option<common::TransitionType>,
     mut params: Option<common::ShaderParams>,
-    qh: &QueueHandle<WallpaperDaemon>,
+    _qh: &QueueHandle<WallpaperDaemon>,
 ) -> Result<()> {
     log::info!(
         "Setting shader wallpaper: {} for output: {:?}",
@@ -78,9 +78,6 @@ pub(in crate::wayland) fn set_shader_wallpaper(
         if width == 0 || height == 0 {
             continue;
         }
-
-        // Clear any existing video managers
-        output_data.video_manager = None;
 
         // Create shader manager for this output
         let shader_mgr = crate::shader_manager::ShaderManager::new(

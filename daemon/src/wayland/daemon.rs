@@ -1,3 +1,16 @@
+//! Wayland wallpaper daemon.
+//!
+//! This module orchestrates the Wayland integration:
+//! - Connects to compositor
+//! - Manages outputs (monitors)
+//! - Handles wallpaper commands via IPC
+//! - Updates video/shader frames
+//! - Manages transitions
+//! - Automatic reconnection on compositor disconnect
+
+// Re-export main types for other wayland modules
+pub(super) use super::types::WallpaperDaemon;
+
 use anyhow::Result;
 use smithay_client_toolkit::{
     compositor::CompositorState, output::OutputState, registry::RegistryState,
@@ -5,13 +18,15 @@ use smithay_client_toolkit::{
 };
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
-use wayland_client::{Connection, QueueHandle, globals::registry_queue_init, protocol::wl_output};
+use wayland_client::{Connection, globals::registry_queue_init};
 
 use crate::log_and_continue;
 use crate::wallpaper_manager::WallpaperManager;
 use crate::{DaemonState, WallpaperCommand};
 
-/// Main entry point for the Wayland manager
+/// Main entry point for the Wayland manager.
+///
+/// Runs in a blocking task and handles reconnection automatically.
 pub async fn run(
     state: Arc<Mutex<DaemonState>>,
     wallpaper_rx: mpsc::UnboundedReceiver<WallpaperCommand>,
@@ -19,100 +34,29 @@ pub async fn run(
     log::info!("Connecting to Wayland compositor...");
 
     // Run Wayland in a blocking task since it's synchronous
-    tokio::task::spawn_blocking(move || run_wayland_with_reconnect(state, wallpaper_rx)).await?
+    tokio::task::spawn_blocking(move || {
+        super::reconnection::run_with_reconnect(state, wallpaper_rx, run_wayland_blocking)
+    })
+    .await?
 }
 
-fn run_wayland_with_reconnect(
-    state: Arc<Mutex<DaemonState>>,
-    mut wallpaper_rx: mpsc::UnboundedReceiver<WallpaperCommand>,
-) -> Result<()> {
-    // Get reconnection settings from config
-    let (enable_reconnection, max_retries, initial_backoff, max_backoff) = {
-        if let Ok(state_guard) = state.try_lock() {
-            if let Some(ref config) = state_guard.config {
-                (
-                    config.advanced.enable_reconnection,
-                    config.advanced.max_reconnection_retries,
-                    config.advanced.initial_reconnection_backoff_ms,
-                    config.advanced.max_reconnection_backoff_ms,
-                )
-            } else {
-                (true, 10, 1000, 10000)
-            }
-        } else {
-            (true, 10, 1000, 10000)
-        }
-    };
-
-    if !enable_reconnection {
-        log::info!("Reconnection disabled, running single connection");
-        return run_wayland_blocking(state, &mut wallpaper_rx);
-    }
-
-    let mut retry_count = 0u32;
-    let mut backoff_ms = initial_backoff;
-
-    loop {
-        // Check if we should exit
-        if let Ok(guard) = state.try_lock()
-            && guard.should_exit
-        {
-            log::info!("Exit signal received, stopping reconnection attempts");
-            return Ok(());
-        }
-
-        match run_wayland_blocking(state.clone(), &mut wallpaper_rx) {
-            Ok(_) => {
-                // Normal exit (e.g., exit command received)
-                log::info!("Wayland manager exited normally");
-                return Ok(());
-            }
-            Err(e) => {
-                let error_msg = format!("{}", e);
-
-                // Check if it's a broken pipe (compositor disconnected)
-                if error_msg.contains("Broken pipe") || error_msg.contains("broken pipe") {
-                    retry_count += 1;
-
-                    log::warn!(
-                        "Wayland compositor disconnected (broken pipe) - attempt {}/{}. Previous connection resources should be dropped now.",
-                        retry_count,
-                        max_retries
-                    );
-
-                    if retry_count > max_retries {
-                        log::error!(
-                            "Failed to reconnect after {} attempts. Giving up.",
-                            max_retries
-                        );
-                        return Err(anyhow::anyhow!("Max reconnection attempts reached"));
-                    }
-
-                    log::warn!(
-                        "Reconnecting in {}ms (attempt {}/{})...",
-                        backoff_ms,
-                        retry_count,
-                        max_retries
-                    );
-
-                    // Wait before retrying - this also gives GStreamer time to clean up resources
-                    std::thread::sleep(std::time::Duration::from_millis(backoff_ms));
-
-                    // Exponential backoff
-                    backoff_ms = std::cmp::min(backoff_ms * 2, max_backoff);
-
-                    // Try again
-                    continue;
-                } else {
-                    // Other error - don't retry
-                    log::error!("Wayland error (not retrying): {}", e);
-                    return Err(e);
-                }
-            }
-        }
-    }
-}
-
+/// Run a single Wayland connection (blocking).
+///
+/// This function:
+/// 1. Initializes GPU renderer (if available)
+/// 2. Connects to Wayland compositor
+/// 3. Creates layer surfaces for each output
+/// 4. Applies initial configuration
+/// 5. Runs event loop until exit or compositor disconnect
+///
+/// # Arguments
+///
+/// * `state` - Shared daemon state
+/// * `wallpaper_rx` - Channel for receiving wallpaper commands
+///
+/// # Returns
+///
+/// Ok on normal exit, Err on fatal error or broken pipe (reconnection will retry)
 fn run_wayland_blocking(
     state: Arc<Mutex<DaemonState>>,
     wallpaper_rx: &mut mpsc::UnboundedReceiver<WallpaperCommand>,
@@ -189,6 +133,8 @@ fn run_wayland_blocking(
         resource_monitor,
         #[cfg(feature = "gpu")]
         gpu_renderer,
+        #[cfg(feature = "video")]
+        video_managers: std::collections::HashMap::new(),
     };
 
     log::info!("Connected to Wayland compositor");
@@ -219,7 +165,7 @@ fn run_wayland_blocking(
 
     // Apply initial wallpapers from configuration
     log::info!("Applying initial configuration...");
-    apply_initial_config(&mut app_data, &qh)?;
+    super::event_loop::apply_initial_config(&mut app_data, &qh)?;
 
     // Event loop with command processing
     loop {
@@ -227,7 +173,7 @@ fn run_wayland_blocking(
         if let Err(e) = event_queue.dispatch_pending(&mut app_data) {
             // Check if it's a broken pipe (compositor disconnected)
             let error_msg = format!("{}", e);
-            if error_msg.contains("Broken pipe") || error_msg.contains("broken pipe") {
+            if super::reconnection::is_broken_pipe_error(&error_msg) {
                 log::warn!("Wayland compositor disconnected (broken pipe).");
                 return Err(anyhow::anyhow!("Broken pipe"));
             }
@@ -264,21 +210,27 @@ fn run_wayland_blocking(
 
         // Check playlist rotation
         log_and_continue!(
-            check_playlist_rotation(&mut app_data, &qh),
+            super::event_loop::check_playlist_rotation(&mut app_data, &qh),
             "check playlist rotation"
         );
 
         // Check schedule
-        log_and_continue!(check_schedule(&mut app_data, &qh), "check schedule");
+        log_and_continue!(
+            super::event_loop::check_schedule(&mut app_data, &qh),
+            "check schedule"
+        );
 
         // Update resource monitor
-        log_and_continue!(check_resources(&mut app_data), "update resource monitor");
+        log_and_continue!(
+            super::event_loop::check_resources(&mut app_data),
+            "update resource monitor"
+        );
 
         // Flush the connection
         if let Err(e) = event_queue.flush() {
             // Check if it's a broken pipe (compositor disconnected)
             let error_msg = format!("{}", e);
-            if error_msg.contains("Broken pipe") || error_msg.contains("broken pipe") {
+            if super::reconnection::is_broken_pipe_error(&error_msg) {
                 log::warn!("Wayland compositor disconnected (broken pipe).");
                 return Err(anyhow::anyhow!("Broken pipe"));
             }
@@ -304,459 +256,18 @@ fn run_wayland_blocking(
 
         // Adaptive sleep: sleep based on next expected frame time
         // Check GIF and video managers for their next frame times
-        let next_frame_delay = get_next_frame_delay(&app_data);
+        let next_frame_delay = super::event_loop::get_next_frame_delay(&app_data);
         std::thread::sleep(next_frame_delay);
     }
 
     log::info!(
-        "run_wayland_blocking - Exiting, app_data will be dropped now (outputs: {}, video managers: {})",
-        app_data.outputs.len(),
-        app_data
-            .outputs
-            .iter()
-            .filter(|o| o.video_manager.is_some())
-            .count()
+        "run_wayland_blocking - Exiting, app_data will be dropped now (outputs: {})",
+        app_data.outputs.len()
     );
 
     // Explicitly drop app_data to ensure cleanup happens before we return
     drop(app_data);
 
     log::info!("run_wayland_blocking - app_data dropped, resources cleaned up");
-    Ok(())
-}
-
-pub struct WallpaperDaemon {
-    pub(super) registry_state: RegistryState,
-    pub(super) compositor_state: CompositorState,
-    pub(super) layer_shell: LayerShell,
-    pub(super) output_state: OutputState,
-    pub(super) shm: Shm,
-    pub(super) outputs: Vec<OutputData>,
-    pub(super) wallpaper_manager: WallpaperManager,
-    pub(super) state: Arc<Mutex<DaemonState>>,
-    pub(super) exit: bool,
-    pub(super) resource_monitor: crate::resource_monitor::ResourceMonitor,
-    /// Shared GPU renderer (if available and enabled)
-    #[cfg(feature = "gpu")]
-    pub(super) gpu_renderer: Option<std::sync::Arc<crate::gpu::GpuRenderer>>,
-}
-
-pub struct OutputData {
-    pub(super) output: wl_output::WlOutput,
-    pub(super) layer_surface: Option<smithay_client_toolkit::shell::wlr_layer::LayerSurface>,
-    pub(super) buffer: Option<crate::buffer::ShmBuffer>,
-    /// Pool of old buffers waiting to be released by compositor
-    pub(super) buffer_pool: Vec<crate::buffer::ShmBuffer>,
-    pub(super) width: u32,
-    pub(super) height: u32,
-    pub(super) scale: f64,
-    pub(super) configured: bool,
-    pub(super) video_manager: Option<crate::video_manager::VideoManager>,
-    pub(super) shader_manager: Option<crate::shader_manager::ShaderManager>,
-    pub(super) overlay_manager: Option<crate::overlay_shader::OverlayManager>,
-    /// Active transition (if any)
-    pub(super) transition: Option<crate::transition::Transition>,
-    /// Pending new wallpaper content (used during transitions)
-    pub(super) pending_wallpaper_data: Option<Vec<u8>>,
-    /// GPU renderer for accelerated rendering (optional)
-    #[cfg(feature = "gpu")]
-    pub(super) gpu_renderer: Option<std::sync::Arc<crate::gpu::GpuRenderer>>,
-}
-
-impl Drop for OutputData {
-    fn drop(&mut self) {
-        log::info!(
-            "OutputData::drop - Cleaning up output ({}x{}, buffer_pool: {}, video: {}, shader: {})",
-            self.width,
-            self.height,
-            self.buffer_pool.len(),
-            self.video_manager.is_some(),
-            self.shader_manager.is_some()
-        );
-
-        // Explicitly drop video manager first to ensure cleanup happens before other resources
-        if let Some(vm) = self.video_manager.take() {
-            log::debug!("Dropping video_manager from OutputData");
-            drop(vm);
-        }
-
-        // Clear other managers
-        self.shader_manager = None;
-        self.overlay_manager = None;
-
-        log::info!("OutputData::drop - Cleanup complete");
-    }
-}
-
-impl OutputData {
-    /// Get a buffer from the pool if available and released, or create a new one
-    pub(super) fn get_buffer(
-        &mut self,
-        shm: &Shm,
-        width: u32,
-        height: u32,
-        qh: &QueueHandle<WallpaperDaemon>,
-    ) -> Result<crate::buffer::ShmBuffer> {
-        // Try to find a released buffer with matching dimensions
-        if let Some(index) = self
-            .buffer_pool
-            .iter()
-            .position(|buf| buf.width() == width && buf.height() == height && buf.is_released())
-        {
-            let buffer = self.buffer_pool.swap_remove(index);
-            log::debug!(
-                "Reusing buffer from pool ({}x{}, pool size: {})",
-                width,
-                height,
-                self.buffer_pool.len()
-            );
-            return Ok(buffer);
-        }
-
-        // No suitable buffer found, create a new one
-        log::debug!("Creating new buffer ({}x{})", width, height);
-        crate::buffer::ShmBuffer::new(shm.wl_shm(), width, height, qh)
-    }
-
-    /// Move the current buffer to the pool before replacing it
-    pub(super) fn swap_buffer(&mut self, new_buffer: crate::buffer::ShmBuffer) {
-        if let Some(old_buffer) = self.buffer.take() {
-            // Mark the buffer as busy (compositor is still using it)
-            // Don't mark as busy here - it's already marked when we called attach()
-            self.buffer_pool.push(old_buffer);
-            log::debug!(
-                "Moved old buffer to pool (pool size: {})",
-                self.buffer_pool.len()
-            );
-        }
-        self.buffer = Some(new_buffer);
-    }
-
-    /// Clean up released buffers from the pool
-    /// Keep at most MAX_POOL_SIZE buffers to avoid unbounded memory growth
-    pub(super) fn cleanup_buffer_pool(&mut self) {
-        const MAX_POOL_SIZE: usize = 3;
-
-        let initial_size = self.buffer_pool.len();
-
-        if initial_size > MAX_POOL_SIZE {
-            // Sort: released buffers first (they can be removed safely)
-            // Then remove excess buffers starting with released ones
-            let mut to_remove = initial_size - MAX_POOL_SIZE;
-
-            self.buffer_pool.retain(|buf| {
-                if to_remove > 0 && buf.is_released() {
-                    to_remove -= 1;
-                    false // Remove this buffer
-                } else {
-                    true // Keep this buffer
-                }
-            });
-
-            let removed = initial_size - self.buffer_pool.len();
-            if removed > 0 {
-                log::debug!(
-                    "Cleaned up {} released buffer(s) from pool (pool size: {} -> {})",
-                    removed,
-                    initial_size,
-                    self.buffer_pool.len()
-                );
-            }
-
-            // Warn if we still have too many (means they're all busy, possible leak)
-            if self.buffer_pool.len() > MAX_POOL_SIZE {
-                log::warn!(
-                    "Buffer pool has {} busy buffers (max: {}), compositor may not be releasing buffers!",
-                    self.buffer_pool.len(),
-                    MAX_POOL_SIZE
-                );
-            }
-        }
-    }
-}
-
-/// Frame data ready for rendering (computed in parallel)
-pub struct FrameUpdate {
-    pub(super) output_index: usize,
-    pub(super) argb_data: Vec<u8>,
-    pub(super) width: u32,
-    pub(super) height: u32,
-}
-
-/// Calculate the optimal sleep duration based on next expected frame
-fn get_next_frame_delay(app_data: &WallpaperDaemon) -> std::time::Duration {
-    use std::time::Duration;
-
-    // Start with a high value, we'll find the minimum needed
-    let mut min_delay = Duration::from_millis(100);
-
-    // Check for active transitions (need 60fps updates)
-    for output_data in &app_data.outputs {
-        if output_data.transition.is_some() {
-            // Transition active, update at 60fps
-            let transition_rate = Duration::from_millis(16);
-            if transition_rate < min_delay {
-                min_delay = transition_rate;
-            }
-        }
-    }
-
-    // Videos (including converted GIFs) produce frames asynchronously, poll at their actual frame rate
-    for output_data in &app_data.outputs {
-        if let Some(video_manager) = &output_data.video_manager {
-            // Poll at the video's actual frame rate to avoid wasting CPU
-            let video_poll_rate = video_manager.frame_duration();
-            if video_poll_rate < min_delay {
-                min_delay = video_poll_rate;
-            }
-        }
-    }
-
-    // Clamp to reasonable bounds
-    // Min: 1ms (don't busy wait)
-    // Max: 100ms (if nothing is animating, check infrequently)
-    min_delay.clamp(Duration::from_millis(1), Duration::from_millis(100))
-}
-
-fn check_playlist_rotation(
-    app_data: &mut WallpaperDaemon,
-    qh: &QueueHandle<WallpaperDaemon>,
-) -> Result<()> {
-    // Check if we have a playlist and if it's time to rotate
-    let should_rotate = {
-        if let Ok(state) = app_data.state.try_lock() {
-            if let Some(ref playlist) = state.playlist {
-                playlist.should_rotate()
-            } else {
-                false
-            }
-        } else {
-            false
-        }
-    };
-
-    if !should_rotate {
-        return Ok(());
-    }
-
-    // Get next wallpaper and config
-    let next_path = {
-        if let Ok(mut state) = app_data.state.try_lock() {
-            if let Some(ref mut playlist) = state.playlist {
-                if let Some(next) = playlist.next() {
-                    let path = next.to_path_buf();
-
-                    // Get transition from config or use default
-                    let (trans, dur) = if let Some(ref config) = state.config {
-                        if let Some(ref playlist_cfg) = config.playlist {
-                            (
-                                playlist_cfg.transition.clone(),
-                                playlist_cfg.transition_duration,
-                            )
-                        } else {
-                            (
-                                config.general.default_transition.clone(),
-                                config.general.default_duration,
-                            )
-                        }
-                    } else {
-                        ("fade".to_string(), 500)
-                    };
-
-                    Some((path, trans, dur))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    };
-
-    if let Some((path, transition, duration)) = next_path {
-        log::info!("Playlist rotation: {:?}", path.display());
-
-        // Parse transition type
-        let transition_type = super::utils::parse_transition(&transition, duration as i32);
-
-        // Set the wallpaper
-        let cmd = crate::WallpaperCommand::SetImage {
-            path: path.to_string_lossy().to_string(),
-            output: None, // Apply to all outputs
-            scale: common::ScaleMode::Fill,
-            transition: Some(transition_type),
-        };
-
-        super::commands::handle_wallpaper_command(app_data, cmd, qh)?;
-    }
-
-    Ok(())
-}
-
-fn check_schedule(app_data: &mut WallpaperDaemon, qh: &QueueHandle<WallpaperDaemon>) -> Result<()> {
-    // Check if scheduler says we should switch wallpaper
-    let scheduled_wallpaper = {
-        if let Ok(mut state) = app_data.state.try_lock() {
-            if let Some(ref mut scheduler) = state.scheduler {
-                if scheduler.should_check() {
-                    scheduler.check()
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    };
-
-    if let Some(scheduled) = scheduled_wallpaper {
-        log::info!(
-            "Schedule activated: {} - {:?}",
-            scheduled.schedule_name,
-            scheduled.path.display()
-        );
-
-        let duration = scheduled.duration as u32;
-
-        // Parse transition type
-        let transition_type =
-            super::utils::parse_transition(&scheduled.transition, duration as i32);
-
-        // Set the wallpaper
-        let cmd = crate::WallpaperCommand::SetImage {
-            path: scheduled.path.to_string_lossy().to_string(),
-            output: None, // Apply to all outputs
-            scale: common::ScaleMode::Fill,
-            transition: Some(transition_type),
-        };
-
-        super::commands::handle_wallpaper_command(app_data, cmd, qh)?;
-    }
-
-    Ok(())
-}
-
-/// Check and update resource monitor
-fn check_resources(app_data: &mut WallpaperDaemon) -> Result<()> {
-    // Only check periodically (every 5 seconds)
-    if !app_data.resource_monitor.should_check() {
-        return Ok(());
-    }
-
-    // Update stats and possibly adjust performance mode
-    let stats = app_data.resource_monitor.update()?;
-    let mode = app_data.resource_monitor.mode();
-
-    // Update shared state with latest stats
-    if let Ok(mut state) = app_data.state.try_lock() {
-        state.resource_stats = Some(stats);
-        state.performance_mode = format!("{:?}", mode);
-    }
-
-    // Log buffer pool statistics to monitor for memory leaks
-    for (idx, output) in app_data.outputs.iter().enumerate() {
-        if !output.buffer_pool.is_empty() {
-            let busy_count = output
-                .buffer_pool
-                .iter()
-                .filter(|b| !b.is_released())
-                .count();
-            let released_count = output.buffer_pool.len() - busy_count;
-            log::debug!(
-                "Output {}: buffer pool size = {} (busy: {}, released: {})",
-                idx,
-                output.buffer_pool.len(),
-                busy_count,
-                released_count
-            );
-        }
-    }
-
-    // Note: Performance mode changes are logged in resource_monitor.update()
-    // Future: Apply throttling based on performance mode
-    //  - Reduce video frame rates
-    //  - Skip GIF frames
-    //  - Pause animations when on battery
-
-    Ok(())
-}
-
-/// Apply initial wallpapers from configuration on startup
-fn apply_initial_config(
-    app_data: &mut WallpaperDaemon,
-    qh: &QueueHandle<WallpaperDaemon>,
-) -> Result<()> {
-    let state_lock = app_data.state.try_lock();
-    if state_lock.is_err() {
-        log::warn!("Could not acquire state lock for initial config");
-        return Ok(());
-    }
-
-    let state = state_lock.unwrap();
-    if state.config.is_none() {
-        return Ok(());
-    }
-
-    let config = state.config.as_ref().unwrap();
-
-    // Collect all wallpaper commands to apply
-    let mut commands = Vec::new();
-
-    // Check if we have per-output wallpapers configured
-    for output_cfg in &config.output {
-        if let Some(ref wallpaper_path) = output_cfg.wallpaper {
-            log::info!(
-                "Preparing initial wallpaper for {}: {}",
-                output_cfg.name,
-                wallpaper_path
-            );
-
-            let transition_type = common::TransitionType::Fade {
-                duration_ms: output_cfg.duration as u32,
-            };
-
-            let scale_mode = super::utils::parse_scale_mode(&output_cfg.scale);
-
-            let cmd = crate::WallpaperCommand::SetImage {
-                path: wallpaper_path.clone(),
-                output: Some(output_cfg.name.clone()),
-                scale: scale_mode,
-                transition: Some(transition_type),
-            };
-
-            commands.push(cmd);
-        }
-    }
-
-    // If no per-output wallpapers were configured, try to start playlist
-    if commands.is_empty()
-        && let Some(ref playlist) = state.playlist
-        && let Some(first) = playlist.current()
-    {
-        log::info!("Starting playlist with: {}", first.display());
-        let first_path = first.to_path_buf();
-
-        let cmd = crate::WallpaperCommand::SetImage {
-            path: first_path.to_string_lossy().to_string(),
-            output: None,
-            scale: common::ScaleMode::Fill,
-            transition: Some(common::TransitionType::Fade { duration_ms: 500 }),
-        };
-
-        commands.push(cmd);
-    }
-
-    // Drop the lock before applying commands
-    drop(state);
-
-    // Apply all collected commands
-    for cmd in commands {
-        super::commands::handle_wallpaper_command(app_data, cmd, qh)?;
-    }
-
     Ok(())
 }

@@ -22,12 +22,14 @@ pub(super) fn sync_outputs_to_shared_state(app_data: &mut WallpaperDaemon) {
                     scale: info.scale_factor as f64,
                     refresh_rate: None,
                 };
+
                 log::info!(
                     "Added output to shared state: {} ({}x{})",
                     output_info.name,
                     output_info.width,
                     output_info.height
                 );
+
                 state.outputs.push(output_info);
             }
         }
@@ -69,6 +71,7 @@ pub(super) fn restore_wallpapers_from_state(
                     transition: None,               // No transition on restore
                 }
             }
+
             common::WallpaperType::Video(path) => {
                 log::info!("Restoring video wallpaper on {}: {}", output_name, path);
                 WallpaperCommand::SetImage {
@@ -78,6 +81,7 @@ pub(super) fn restore_wallpapers_from_state(
                     transition: None,
                 }
             }
+
             common::WallpaperType::Color(color) => {
                 log::info!("Restoring color wallpaper on {}: {}", output_name, color);
                 WallpaperCommand::SetColor {
@@ -85,6 +89,7 @@ pub(super) fn restore_wallpapers_from_state(
                     output: Some(output_name.clone()),
                 }
             }
+
             common::WallpaperType::Shader(shader) => {
                 log::info!("Restoring shader wallpaper on {}: {}", output_name, shader);
                 WallpaperCommand::SetShader {
@@ -94,6 +99,7 @@ pub(super) fn restore_wallpapers_from_state(
                     params: None, // Use default params when restoring
                 }
             }
+
             common::WallpaperType::None => {
                 log::debug!("Skipping 'None' wallpaper for {}", output_name);
                 continue;
@@ -140,7 +146,10 @@ pub(super) fn create_layer_surface(
         height: 0,
         scale: 1.0,
         configured: false,
+        #[allow(deprecated)]
         video_manager: None,
+        #[cfg(feature = "video")]
+        video_path: None,
         shader_manager: None,
         overlay_manager: None,
         transition: None,
@@ -150,5 +159,6 @@ pub(super) fn create_layer_surface(
     });
 
     log::info!("Created layer surface for output");
+
     Ok(())
 }

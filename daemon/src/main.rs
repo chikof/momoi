@@ -9,7 +9,7 @@ mod resource_monitor;
 mod scheduler;
 mod shader_manager;
 mod transition;
-mod video_manager;
+mod video;
 mod wallpaper_manager;
 mod wayland;
 

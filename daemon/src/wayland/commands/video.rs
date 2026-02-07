@@ -62,7 +62,6 @@ pub(in crate::wayland) fn set_video_wallpaper(
         }
 
         // Clear any old managers (can't have both video and shader)
-        output_data.video_manager = None;
         output_data.shader_manager = None;
 
         // Get target FPS from config

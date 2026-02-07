@@ -36,6 +36,7 @@ impl BuiltinShader {
     }
 
     pub fn name(&self) -> &str {
+        #[allow(dead_code)] // Part of public API for shader name lookup
         match self {
             BuiltinShader::Plasma => "plasma",
             BuiltinShader::Waves => "waves",
@@ -50,6 +51,7 @@ impl BuiltinShader {
 
 /// Shader context with uniforms
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Context fields used for shader uniform data
 pub struct ShaderContext {
     /// Current time in seconds since shader start
     pub time: f32,
@@ -72,6 +74,7 @@ impl ShaderContext {
     }
 
     /// Update time based on elapsed duration
+    #[allow(dead_code)] // Used for time-based shader animations
     pub fn update(&mut self, elapsed: f32) {
         self.time += elapsed;
         self.frame += 1;
@@ -119,6 +122,7 @@ impl ShaderManager {
     }
 
     /// Set target frame rate
+    #[allow(dead_code)] // Part of public API for FPS control
     pub fn set_fps(&mut self, fps: u32) {
         self.target_fps = fps;
     }
@@ -387,11 +391,13 @@ impl ShaderManager {
     }
 
     /// Get current shader type
+    #[allow(dead_code)] // Part of public API for shader queries
     pub fn shader(&self) -> BuiltinShader {
         self.shader
     }
 
     /// Change shader
+    #[allow(dead_code)] // Part of public API for shader switching
     pub fn set_shader(&mut self, shader: BuiltinShader) {
         if self.shader != shader {
             self.shader = shader;

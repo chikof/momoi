@@ -141,6 +141,7 @@ pub fn convert_gif_to_webm(gif_path: impl AsRef<Path>) -> Result<PathBuf> {
 /// # Returns
 ///
 /// `true` if the file is an animated GIF, `false` otherwise
+#[allow(dead_code)] // Utility function for future GIF detection features
 pub fn is_animated_gif(path: impl AsRef<Path>) -> Result<bool> {
     use image::AnimationDecoder;
     use image::codecs::gif::GifDecoder;
@@ -174,6 +175,7 @@ pub fn is_animated_gif(path: impl AsRef<Path>) -> Result<bool> {
 /// # Arguments
 ///
 /// * `max_age` - Maximum age of cached files in seconds
+#[allow(dead_code)] // Utility function for cache management, may be used by cleanup daemon
 pub fn cleanup_cache(max_age: u64) -> Result<()> {
     let cache_dir = dirs::cache_dir()
         .context("Failed to get cache directory")?

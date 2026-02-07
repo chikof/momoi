@@ -14,17 +14,20 @@
 /// - `pipeline`: Render pipeline creation
 /// - `texture`: Texture upload and management
 pub mod context;
+mod pipeline_builder;
 pub mod renderer;
 pub mod texture;
+mod video_buffer_pool;
 
 pub use context::GpuContext;
 pub use renderer::GpuRenderer;
 pub use texture::GpuTexture;
+pub use video_buffer_pool::VideoBufferPool;
 
 /// Check if GPU rendering is available on this system
 pub fn is_available() -> bool {
     // Try to create a wgpu instance
-    wgpu::Instance::new(wgpu::InstanceDescriptor {
+    wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends: wgpu::Backends::all(),
         ..Default::default()
     });

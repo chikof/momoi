@@ -1,6 +1,9 @@
-use crate::gpu::{GpuContext, GpuTexture};
-/// High-level GPU renderer for wallpaper content
+use crate::gpu::pipeline_builder::{PipelineBuilder, bind_group_entries, create_pipeline_layout};
+use crate::gpu::{GpuContext, GpuTexture, VideoBufferPool};
+
 use anyhow::Result;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use wgpu;
 use wgpu::util::DeviceExt;
 
@@ -26,6 +29,7 @@ pub struct GpuRenderer {
     /// Render pipeline for tunnel shader
     tunnel_pipeline: wgpu::RenderPipeline,
     /// Render pipeline for overlay effects
+    #[allow(dead_code)] // For future overlay feature integration
     overlay_pipeline: wgpu::RenderPipeline,
     /// Render pipeline for blending two textures (transitions)
     blend_pipeline: wgpu::RenderPipeline,
@@ -36,9 +40,20 @@ pub struct GpuRenderer {
     /// Bind group layout for shader uniforms
     shader_uniform_layout: wgpu::BindGroupLayout,
     /// Bind group layout for overlay shader (texture + sampler + uniforms)
+    #[allow(dead_code)] // For future overlay feature integration
     overlay_bind_group_layout: wgpu::BindGroupLayout,
     /// Sampler for texture sampling
+    #[allow(dead_code)] // Sampler used by overlay and other features
     sampler: wgpu::Sampler,
+    /// Video buffer pools for async readback, keyed by resolution (width, height)
+    /// Each resolution needs its own buffer pool for proper double buffering
+    video_buffer_pools: Arc<Mutex<std::collections::HashMap<(u32, u32), VideoBufferPool>>>,
+    /// Source texture pool: shared across all scaling operations with the same source resolution
+    /// Keyed by (source_w, source_h). Only ONE source texture per source resolution.
+    video_source_textures: Arc<Mutex<std::collections::HashMap<(u32, u32), GpuTexture>>>,
+    /// Target texture pool: one render target per output resolution
+    /// Keyed by (target_w, target_h). These are where scaled frames are rendered.
+    video_target_textures: Arc<Mutex<std::collections::HashMap<(u32, u32), GpuTexture>>>,
 }
 
 impl GpuRenderer {
@@ -53,24 +68,8 @@ impl GpuRenderer {
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("Texture Bind Group Layout"),
                     entries: &[
-                        // Texture
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            count: None,
-                        },
-                        // Sampler
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
+                        bind_group_entries::texture(0),
+                        bind_group_entries::sampler(1),
                     ],
                 });
 
@@ -82,110 +81,36 @@ impl GpuRenderer {
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::MipmapFilterMode::Nearest,
             ..Default::default()
         });
 
         // Create simple blit shader for proof-of-concept
-        let shader = context
+        let _shader = context
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("Blit Shader"),
                 source: wgpu::ShaderSource::Wgsl(include_str!("shaders/blit.wgsl").into()),
             });
 
-        let pipeline_layout =
-            context
-                .device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("Blit Pipeline Layout"),
-                    bind_group_layouts: &[&texture_bind_group_layout],
-                    push_constant_ranges: &[],
-                });
+        let pipeline_layout = create_pipeline_layout(
+            &context.device,
+            "Blit Pipeline Layout",
+            &[&texture_bind_group_layout],
+        );
 
         let blit_pipeline =
-            context
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Blit Pipeline"),
-                    layout: Some(&pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    multiview: None,
-                });
+            PipelineBuilder::new(&context.device, include_str!("shaders/blit.wgsl"))
+                .with_label("Blit Pipeline")
+                .with_layout(&pipeline_layout)
+                .build();
 
         // Create scaling shader pipeline
-        let scale_shader = context
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Scale Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/scale.wgsl").into()),
-            });
-
         let scale_pipeline =
-            context
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Scale Pipeline"),
-                    layout: Some(&pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &scale_shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &scale_shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    multiview: None,
-                });
+            PipelineBuilder::new(&context.device, include_str!("shaders/scale.wgsl"))
+                .with_label("Scale Pipeline")
+                .with_layout(&pipeline_layout)
+                .build();
 
         // Create bind group layout for shader uniforms (time, resolution, etc.)
         let shader_uniform_layout =
@@ -193,351 +118,63 @@ impl GpuRenderer {
                 .device
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("Shader Uniform Layout"),
-                    entries: &[wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    }],
+                    entries: &[bind_group_entries::uniform_buffer(0)],
                 });
 
         // Create plasma shader pipeline
-        let plasma_shader = context
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Plasma Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/plasma.wgsl").into()),
-            });
-
-        let plasma_pipeline_layout =
-            context
-                .device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("Plasma Pipeline Layout"),
-                    bind_group_layouts: &[&shader_uniform_layout],
-                    push_constant_ranges: &[],
-                });
+        let plasma_pipeline_layout = create_pipeline_layout(
+            &context.device,
+            "Plasma Pipeline Layout",
+            &[&shader_uniform_layout],
+        );
 
         let plasma_pipeline =
-            context
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Plasma Pipeline"),
-                    layout: Some(&plasma_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &plasma_shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &plasma_shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    multiview: None,
-                });
+            PipelineBuilder::new(&context.device, include_str!("shaders/plasma.wgsl"))
+                .with_label("Plasma Pipeline")
+                .with_layout(&plasma_pipeline_layout)
+                .build();
 
         // Create waves shader pipeline
-        let waves_shader = context
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Waves Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/waves.wgsl").into()),
-            });
-
         let waves_pipeline =
-            context
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Waves Pipeline"),
-                    layout: Some(&plasma_pipeline_layout), // Reuse same layout
-                    vertex: wgpu::VertexState {
-                        module: &waves_shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &waves_shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    multiview: None,
-                });
+            PipelineBuilder::new(&context.device, include_str!("shaders/waves.wgsl"))
+                .with_label("Waves Pipeline")
+                .with_layout(&plasma_pipeline_layout)
+                .build();
 
         // Create gradient shader pipeline
-        let gradient_shader = context
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Gradient Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/gradient.wgsl").into()),
-            });
-
         let gradient_pipeline =
-            context
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Gradient Pipeline"),
-                    layout: Some(&plasma_pipeline_layout), // Reuse same layout
-                    vertex: wgpu::VertexState {
-                        module: &gradient_shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &gradient_shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    multiview: None,
-                });
+            PipelineBuilder::new(&context.device, include_str!("shaders/gradient.wgsl"))
+                .with_label("Gradient Pipeline")
+                .with_layout(&plasma_pipeline_layout)
+                .build();
 
         // Create starfield shader pipeline
-        let starfield_shader = context
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Starfield Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/starfield.wgsl").into()),
-            });
-
         let starfield_pipeline =
-            context
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Starfield Pipeline"),
-                    layout: Some(&plasma_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &starfield_shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &starfield_shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    multiview: None,
-                });
+            PipelineBuilder::new(&context.device, include_str!("shaders/starfield.wgsl"))
+                .with_label("Starfield Pipeline")
+                .with_layout(&plasma_pipeline_layout)
+                .build();
 
         // Create matrix shader pipeline
-        let matrix_shader = context
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Matrix Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/matrix.wgsl").into()),
-            });
-
         let matrix_pipeline =
-            context
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Matrix Pipeline"),
-                    layout: Some(&plasma_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &matrix_shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &matrix_shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    multiview: None,
-                });
+            PipelineBuilder::new(&context.device, include_str!("shaders/matrix.wgsl"))
+                .with_label("Matrix Pipeline")
+                .with_layout(&plasma_pipeline_layout)
+                .build();
 
         // Create raymarching shader pipeline
-        let raymarching_shader =
-            context
-                .device
-                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("Raymarching Shader"),
-                    source: wgpu::ShaderSource::Wgsl(
-                        include_str!("shaders/raymarching.wgsl").into(),
-                    ),
-                });
-
         let raymarching_pipeline =
-            context
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Raymarching Pipeline"),
-                    layout: Some(&plasma_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &raymarching_shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &raymarching_shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    multiview: None,
-                });
+            PipelineBuilder::new(&context.device, include_str!("shaders/raymarching.wgsl"))
+                .with_label("Raymarching Pipeline")
+                .with_layout(&plasma_pipeline_layout)
+                .build();
 
         // Create tunnel shader pipeline
-        let tunnel_shader = context
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Tunnel Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/tunnel.wgsl").into()),
-            });
-
         let tunnel_pipeline =
-            context
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Tunnel Pipeline"),
-                    layout: Some(&plasma_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &tunnel_shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &tunnel_shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    multiview: None,
-                });
+            PipelineBuilder::new(&context.device, include_str!("shaders/tunnel.wgsl"))
+                .with_label("Tunnel Pipeline")
+                .with_layout(&plasma_pipeline_layout)
+                .build();
 
         // Create overlay bind group layout (texture + sampler + uniforms)
         let overlay_bind_group_layout =
@@ -546,92 +183,24 @@ impl GpuRenderer {
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("Overlay Bind Group Layout"),
                     entries: &[
-                        // Base texture
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            count: None,
-                        },
-                        // Sampler
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
-                        // Uniforms
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
+                        bind_group_entries::texture(0),
+                        bind_group_entries::sampler(1),
+                        bind_group_entries::uniform_buffer(2),
                     ],
                 });
 
         // Create overlay shader pipeline
-        let overlay_shader = context
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Overlay Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/overlay.wgsl").into()),
-            });
-
-        let overlay_pipeline_layout =
-            context
-                .device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("Overlay Pipeline Layout"),
-                    bind_group_layouts: &[&overlay_bind_group_layout],
-                    push_constant_ranges: &[],
-                });
+        let overlay_pipeline_layout = create_pipeline_layout(
+            &context.device,
+            "Overlay Pipeline Layout",
+            &[&overlay_bind_group_layout],
+        );
 
         let overlay_pipeline =
-            context
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Overlay Pipeline"),
-                    layout: Some(&overlay_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &overlay_shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &overlay_shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    multiview: None,
-                });
+            PipelineBuilder::new(&context.device, include_str!("shaders/overlay.wgsl"))
+                .with_label("Overlay Pipeline")
+                .with_layout(&overlay_pipeline_layout)
+                .build();
 
         // Create blend bind group layout (for transitions with 2 textures)
         let blend_bind_group_layout =
@@ -640,103 +209,25 @@ impl GpuRenderer {
                 .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                     label: Some("Blend Bind Group Layout"),
                     entries: &[
-                        // Uniforms
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 0,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Buffer {
-                                ty: wgpu::BufferBindingType::Uniform,
-                                has_dynamic_offset: false,
-                                min_binding_size: None,
-                            },
-                            count: None,
-                        },
-                        // Old texture
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 1,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            count: None,
-                        },
-                        // New texture
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 2,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Texture {
-                                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                                view_dimension: wgpu::TextureViewDimension::D2,
-                                multisampled: false,
-                            },
-                            count: None,
-                        },
-                        // Sampler
-                        wgpu::BindGroupLayoutEntry {
-                            binding: 3,
-                            visibility: wgpu::ShaderStages::FRAGMENT,
-                            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                            count: None,
-                        },
+                        bind_group_entries::uniform_buffer(0),
+                        bind_group_entries::texture(1),
+                        bind_group_entries::texture(2),
+                        bind_group_entries::sampler(3),
                     ],
                 });
 
         // Create blend shader pipeline
-        let blend_shader = context
-            .device
-            .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("Blend Shader"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/blend.wgsl").into()),
-            });
-
-        let blend_pipeline_layout =
-            context
-                .device
-                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: Some("Blend Pipeline Layout"),
-                    bind_group_layouts: &[&blend_bind_group_layout],
-                    push_constant_ranges: &[],
-                });
+        let blend_pipeline_layout = create_pipeline_layout(
+            &context.device,
+            "Blend Pipeline Layout",
+            &[&blend_bind_group_layout],
+        );
 
         let blend_pipeline =
-            context
-                .device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Some("Blend Pipeline"),
-                    layout: Some(&blend_pipeline_layout),
-                    vertex: wgpu::VertexState {
-                        module: &blend_shader,
-                        entry_point: "vs_main",
-                        buffers: &[],
-                    },
-                    fragment: Some(wgpu::FragmentState {
-                        module: &blend_shader,
-                        entry_point: "fs_main",
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                            blend: Some(wgpu::BlendState::REPLACE),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        unclipped_depth: false,
-                        conservative: false,
-                    },
-                    depth_stencil: None,
-                    multisample: wgpu::MultisampleState {
-                        count: 1,
-                        mask: !0,
-                        alpha_to_coverage_enabled: false,
-                    },
-                    multiview: None,
-                });
+            PipelineBuilder::new(&context.device, include_str!("shaders/blend.wgsl"))
+                .with_label("Blend Pipeline")
+                .with_layout(&blend_pipeline_layout)
+                .build();
 
         log::info!("GPU renderer initialized");
 
@@ -758,6 +249,9 @@ impl GpuRenderer {
             shader_uniform_layout,
             overlay_bind_group_layout,
             sampler,
+            video_buffer_pools: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            video_source_textures: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            video_target_textures: Arc::new(Mutex::new(std::collections::HashMap::new())),
         })
     }
 
@@ -818,10 +312,12 @@ impl GpuRenderer {
                         }),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
         }
 
@@ -839,15 +335,10 @@ impl GpuRenderer {
         });
 
         encoder.copy_texture_to_buffer(
-            wgpu::ImageCopyTexture {
-                texture: &output_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::ImageCopyBuffer {
+            output_texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
                 buffer: &output_buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(aligned_bytes_per_row),
                     rows_per_image: Some(height),
@@ -865,13 +356,17 @@ impl GpuRenderer {
 
         // Map buffer and read data
         let buffer_slice = output_buffer.slice(..);
+
         let (sender, receiver) = futures::channel::oneshot::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).unwrap();
         });
 
         // Wait for mapping to complete
-        self.context.device.poll(wgpu::Maintain::Wait);
+        let _ = self.context.device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
         pollster::block_on(receiver).unwrap()?;
 
         // Get mapped data
@@ -879,23 +374,26 @@ impl GpuRenderer {
 
         // Convert RGBA to ARGB for Wayland, accounting for padding
         let mut argb_data = vec![0u8; (width * height * 4) as usize];
+
         for y in 0..height {
             for x in 0..width {
                 let src_offset = (y * aligned_bytes_per_row + x * 4) as usize;
                 let dst_offset = ((y * width + x) * 4) as usize;
 
                 // Convert RGBA -> ARGB
-                argb_data[dst_offset] = data[src_offset + 3]; // A
-                argb_data[dst_offset + 1] = data[src_offset]; // R
+                argb_data[dst_offset + 0] = data[src_offset + 3]; // A
+                argb_data[dst_offset + 1] = data[src_offset + 0]; // R
                 argb_data[dst_offset + 2] = data[src_offset + 1]; // G
                 argb_data[dst_offset + 3] = data[src_offset + 2]; // B
             }
         }
 
         drop(data);
+
         output_buffer.unmap();
 
         log::debug!("GPU render complete, {} bytes", argb_data.len());
+
         Ok(argb_data)
     }
 
@@ -961,7 +459,6 @@ impl GpuRenderer {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Image Render Encoder"),
                 });
-
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Image Scale Pass"),
@@ -972,10 +469,12 @@ impl GpuRenderer {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             render_pass.set_pipeline(&self.scale_pipeline);
@@ -992,6 +491,7 @@ impl GpuRenderer {
     /// Render an ARGB image (Wayland format) with GPU scaling
     ///
     /// Convenience method that converts ARGB -> RGBA -> GPU -> ARGB
+    #[allow(dead_code)] // Alternative API for ARGB image rendering
     pub fn render_image_argb(
         &self,
         image_data: &[u8],
@@ -1002,8 +502,10 @@ impl GpuRenderer {
     ) -> Result<Vec<u8>> {
         // Convert ARGB -> RGBA for GPU
         let mut rgba_data = vec![0u8; image_data.len()];
+
         for i in 0..(image_data.len() / 4) {
             let offset = i * 4;
+
             rgba_data[offset + 0] = image_data[offset + 2]; // R
             rgba_data[offset + 1] = image_data[offset + 1]; // G
             rgba_data[offset + 2] = image_data[offset + 0]; // B
@@ -1013,12 +515,201 @@ impl GpuRenderer {
         self.render_image(&rgba_data, src_width, src_height, dst_width, dst_height)
     }
 
+    /// Render a BGRA video frame (GStreamer format) with GPU acceleration
+    ///
+    /// This is optimized for video playback with async double-buffered readback.
+    /// BGRA data is uploaded directly to GPU without CPU conversion, rendered,
+    /// and read back asynchronously to avoid GPU stalls.
+    ///
+    /// Returns `None` if GPU readback is not ready yet (caller should reuse previous frame).
+    ///
+    /// # Arguments
+    /// * `bgra_data` - Video frame in BGRA format from GStreamer
+    /// * `width` - Frame width
+    /// * `height` - Frame height
+    ///
+    /// # Returns
+    /// * `Some(Vec<u8>)` - ARGB8 buffer for Wayland if ready
+    /// * `None` - GPU not ready, reuse previous frame
+    /// Render video frame with optional GPU scaling
+    ///
+    /// Takes BGRA data at source resolution and renders to target resolution.
+    /// If source == target, uses blit pipeline (fast copy).
+    /// If source != target, uses scale pipeline (GPU bilinear filtering).
+    ///
+    /// This enables single video decode pipeline for multiple output resolutions.
+    pub async fn render_video_frame_bgra(
+        &self,
+        bgra_data: &[u8],
+        source_width: u32,
+        source_height: u32,
+        target_width: u32,
+        target_height: u32,
+    ) -> Result<Option<Vec<u8>>> {
+        log::trace!(
+            "GPU rendering video frame: {}x{} -> {}x{}",
+            source_width,
+            source_height,
+            target_width,
+            target_height
+        );
+
+        let source_key = (source_width, source_height);
+        let target_key = (target_width, target_height);
+
+        // Initialize buffer pool for target resolution (output size)
+        let mut buffer_pools = self.video_buffer_pools.lock().await;
+
+        buffer_pools.entry(target_key).or_insert_with(|| {
+            log::info!(
+                "Initializing video buffer pool for {}x{} (double buffering)",
+                target_width,
+                target_height
+            );
+            VideoBufferPool::new(&self.context.device, target_width, target_height)
+        });
+
+        // Try to read previous frame (non-blocking)
+        let previous_frame = buffer_pools
+            .get_mut(&target_key)
+            .unwrap()
+            .try_read_frame(&self.context.device)?;
+
+        // Drop buffer pools lock before acquiring texture locks
+        drop(buffer_pools);
+
+        // Initialize/update source texture (SHARED across all scaling operations)
+        // We need to hold both source and target locks during rendering to avoid borrow issues
+        let mut source_textures = self.video_source_textures.lock().await;
+        let mut target_textures = self.video_target_textures.lock().await;
+
+        let source_texture = source_textures.entry(source_key).or_insert_with(|| {
+            log::info!(
+                "Creating shared source texture for {}x{} (will be reused for all scaling operations)",
+                source_width,
+                source_height
+            );
+            GpuTexture::from_bgra(
+                &self.context.device,
+                &self.context.queue,
+                &self.texture_bind_group_layout,
+                &self.sampler,
+                source_width,
+                source_height,
+                bgra_data,
+            )
+            .expect("Failed to create source texture")
+        });
+
+        // Update source texture data (only once per frame, regardless of how many outputs)
+        self.context.queue.write_texture(
+            source_texture.texture.as_image_copy(),
+            bgra_data,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(source_width * 4),
+                rows_per_image: Some(source_height),
+            },
+            wgpu::Extent3d {
+                width: source_width,
+                height: source_height,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let target_texture = target_textures.entry(target_key).or_insert_with(|| {
+            let scale_info = if source_key == target_key {
+                "no scaling (blit)"
+            } else {
+                "with GPU scaling"
+            };
+
+            log::info!(
+                "Creating target texture for {}x{} ({})",
+                target_width,
+                target_height,
+                scale_info
+            );
+            GpuTexture::create_render_target(
+                &self.context.device,
+                &self.texture_bind_group_layout,
+                &self.sampler,
+                target_width,
+                target_height,
+            )
+            .expect("Failed to create target texture")
+        });
+
+        // Choose pipeline: blit for same size, scale for different sizes
+        let pipeline = if source_key == target_key {
+            &self.blit_pipeline
+        } else {
+            &self.scale_pipeline
+        };
+
+        // Render: source texture -> target texture (scaling happens here)
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Video Frame Render Encoder"),
+                });
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Video Frame Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &target_texture.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+
+            render_pass.set_pipeline(pipeline);
+            render_pass.set_bind_group(0, &source_texture.bind_group, &[]);
+            render_pass.draw(0..3, 0..1); // Full-screen triangle
+        }
+
+        // Submit render commands
+        self.context.queue.submit(std::iter::once(encoder.finish()));
+
+        // Get target texture reference for readback (before dropping lock)
+        let target_texture_ref = &target_texture.texture;
+
+        // Start async readback while still holding texture locks
+        // This is safe because readback creates its own command buffer
+        let mut buffer_pools = self.video_buffer_pools.lock().await;
+        let pool = buffer_pools.get_mut(&target_key).unwrap();
+        pool.start_readback(
+            &self.context.device,
+            &self.context.queue,
+            target_texture_ref,
+        );
+
+        // Now drop all locks
+        drop(buffer_pools);
+        drop(source_textures);
+        drop(target_textures);
+
+        // Return previous frame if ready, None if we need to wait
+        Ok(previous_frame)
+    }
+
     /// Get bind group layout for texture operations
+    #[allow(dead_code)] // Part of public API for custom pipeline creation
     pub fn texture_bind_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.texture_bind_group_layout
     }
 
     /// Get sampler for texture operations
+    #[allow(dead_code)] // Part of public API for custom texture operations
     pub fn sampler(&self) -> &wgpu::Sampler {
         &self.sampler
     }
@@ -1067,11 +758,13 @@ impl GpuRenderer {
             .as_ref()
             .and_then(|c| common::ShaderParams::parse_color(c))
             .unwrap_or((1.0, 0.0, 0.0)); // Default red
+
         let color2 = params
             .color2
             .as_ref()
             .and_then(|c| common::ShaderParams::parse_color(c))
             .unwrap_or((0.0, 0.0, 1.0)); // Default blue
+
         let color3 = params
             .color3
             .as_ref()
@@ -1157,7 +850,6 @@ impl GpuRenderer {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Shader Render Encoder"),
                 });
-
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Shader Pass"),
@@ -1168,10 +860,12 @@ impl GpuRenderer {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             render_pass.set_pipeline(pipeline);
@@ -1219,11 +913,11 @@ impl GpuRenderer {
 
         for i in 0..(old_frame.len() / 4) {
             let offset = i * 4;
+
             old_rgba[offset + 0] = old_frame[offset + 2]; // R
             old_rgba[offset + 1] = old_frame[offset + 1]; // G
             old_rgba[offset + 2] = old_frame[offset + 0]; // B
             old_rgba[offset + 3] = old_frame[offset + 3]; // A
-
             new_rgba[offset + 0] = new_frame[offset + 2]; // R
             new_rgba[offset + 1] = new_frame[offset + 1]; // G
             new_rgba[offset + 2] = new_frame[offset + 0]; // B
@@ -1320,7 +1014,6 @@ impl GpuRenderer {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Blend Encoder"),
                 });
-
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Blend Pass"),
@@ -1331,10 +1024,12 @@ impl GpuRenderer {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             render_pass.set_pipeline(&self.blend_pipeline);
@@ -1360,6 +1055,7 @@ impl GpuRenderer {
     ///
     /// # Returns
     /// ARGB8 buffer with overlay applied
+    #[allow(dead_code)] // For future overlay feature integration
     pub fn render_with_overlay(
         &self,
         base_frame: &[u8],
@@ -1371,8 +1067,10 @@ impl GpuRenderer {
     ) -> Result<Vec<u8>> {
         // Convert ARGB -> RGBA for GPU
         let mut rgba_data = vec![0u8; base_frame.len()];
+
         for i in 0..(base_frame.len() / 4) {
             let offset = i * 4;
+
             rgba_data[offset + 0] = base_frame[offset + 2]; // R
             rgba_data[offset + 1] = base_frame[offset + 1]; // G
             rgba_data[offset + 2] = base_frame[offset + 0]; // B
@@ -1482,7 +1180,6 @@ impl GpuRenderer {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("Overlay Encoder"),
                 });
-
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Overlay Pass"),
@@ -1493,10 +1190,12 @@ impl GpuRenderer {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             render_pass.set_pipeline(&self.overlay_pipeline);

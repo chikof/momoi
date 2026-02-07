@@ -65,9 +65,10 @@ shellexpand = "3.1"
 sysinfo = "0.37.2"
 
 [features]
-default = []
-video = ["gstreamer", "gstreamer-video", "gstreamer-app"]
-gpu = ["wgpu", "pollster", "futures", "bytemuck"]
+default = ["all"]
+video = ["dep:gstreamer", "dep:gstreamer-video", "dep:gstreamer-app", "dep:futures"]
+gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:futures"]
+profiling = []  # Enables performance profiling and detailed logging
 all = ["video", "gpu"]
 
 [[bin]]

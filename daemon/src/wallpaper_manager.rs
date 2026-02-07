@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use image::{DynamicImage, GenericImageView, ImageBuffer, Rgba};
+use image::{DynamicImage, ImageBuffer, Rgba};
 use std::path::Path;
 
 /// Manages wallpaper loading, caching, and processing
@@ -8,6 +8,7 @@ pub struct WallpaperManager {
 }
 
 /// A cached image with metadata
+#[allow(dead_code)] // Field 'path' kept for future cache management features
 struct CachedImage {
     image: DynamicImage,
     path: String,
@@ -317,12 +318,14 @@ impl WallpaperManager {
     }
 
     /// Clear the image cache
+    #[allow(dead_code)] // Part of public API for cache management
     pub fn clear_cache(&mut self) {
         log::info!("Clearing image cache ({} entries)", self.cache.len());
         self.cache.clear();
     }
 
     /// Get cache size
+    #[allow(dead_code)] // Part of public API for cache introspection
     pub fn cache_size(&self) -> usize {
         self.cache.len()
     }

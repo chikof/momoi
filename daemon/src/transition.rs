@@ -2,6 +2,7 @@ use std::time::{Duration, Instant};
 
 /// Transition effect types
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)] // All variants used via conversion from common::TransitionType
 pub enum TransitionType {
     /// No transition, instant switch
     None,
@@ -69,6 +70,7 @@ impl From<&common::TransitionType> for TransitionType {
 
 /// Easing functions for smooth transitions
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // All variants part of public easing API
 pub enum EasingFunction {
     /// Linear interpolation (constant speed)
     Linear,
@@ -425,6 +427,7 @@ impl Transition {
     }
 
     /// Set the easing function
+    #[allow(dead_code)] // Builder method for public API
     pub fn with_easing(mut self, easing: EasingFunction) -> Self {
         self.easing = easing;
         self

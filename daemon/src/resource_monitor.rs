@@ -22,6 +22,7 @@ impl Default for PerformanceMode {
 
 impl PerformanceMode {
     /// Parse from string (case-insensitive)
+    #[allow(dead_code)] // Part of public API for CLI/config parsing
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "performance" => Some(PerformanceMode::Performance),
@@ -32,6 +33,7 @@ impl PerformanceMode {
     }
 
     /// Get video frame rate limit for this mode
+    #[allow(dead_code)] // Used by video performance tuning
     pub fn video_fps_limit(&self) -> u32 {
         match self {
             PerformanceMode::Performance => 60,
@@ -41,6 +43,7 @@ impl PerformanceMode {
     }
 
     /// Get GIF frame rate limit for this mode
+    #[allow(dead_code)] // Used by GIF performance tuning
     pub fn gif_fps_limit(&self) -> u32 {
         match self {
             PerformanceMode::Performance => 50,
@@ -50,6 +53,7 @@ impl PerformanceMode {
     }
 
     /// Get memory limit in MB for frame caches
+    #[allow(dead_code)] // Used by memory management features
     pub fn memory_limit_mb(&self) -> usize {
         match self {
             PerformanceMode::Performance => 500,
@@ -74,6 +78,7 @@ pub struct ResourceStats {
 
 /// Resource monitor configuration
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // Config fields for future resource management features
 pub struct ResourceConfig {
     /// Enable automatic performance mode switching based on battery
     pub auto_battery_mode: bool,
@@ -134,6 +139,7 @@ impl ResourceMonitor {
     }
 
     /// Set performance mode manually
+    #[allow(dead_code)] // Part of public API for manual mode control
     pub fn set_mode(&mut self, mode: PerformanceMode) {
         if self.mode != mode {
             log::info!("Performance mode changed: {:?} -> {:?}", self.mode, mode);
@@ -233,6 +239,7 @@ impl ResourceMonitor {
     }
 
     /// Check if we're over memory limit
+    #[allow(dead_code)] // Used by memory management features
     pub fn is_over_memory_limit(&self, current_bytes: u64) -> bool {
         if !self.config.enforce_memory_limits || self.config.max_memory_mb == 0 {
             return false;
@@ -243,6 +250,7 @@ impl ResourceMonitor {
     }
 
     /// Get current memory limit for the active performance mode
+    #[allow(dead_code)] // Used by memory management features
     pub fn current_memory_limit_mb(&self) -> usize {
         if self.config.max_memory_mb > 0 {
             self.config.max_memory_mb.min(self.mode.memory_limit_mb())
