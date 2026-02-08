@@ -230,22 +230,16 @@ impl VideoBufferPool {
         let buffer_slice = buffer.slice(..);
         let data = buffer_slice.get_mapped_range();
 
-        // Convert RGBA -> ARGB and remove padding
+        // BGRA render target output matches Wayland ARGB byte layout directly.
+        // Just strip row padding (no per-pixel swizzle needed).
+        let unpadded_row_bytes = (self.width * 4) as usize;
         let mut argb_data = vec![0u8; (self.width * self.height * 4) as usize];
 
         for row in 0..self.height {
             let src_offset = (row * self.padded_bytes_per_row) as usize;
-            let dst_offset = (row * self.width * 4) as usize;
-
-            for col in 0..self.width {
-                let src_pixel = src_offset + (col * 4) as usize;
-                let dst_pixel = dst_offset + (col * 4) as usize;
-
-                argb_data[dst_pixel + 0] = data[src_pixel + 2]; // B
-                argb_data[dst_pixel + 1] = data[src_pixel + 1]; // G
-                argb_data[dst_pixel + 2] = data[src_pixel + 0]; // R
-                argb_data[dst_pixel + 3] = data[src_pixel + 3]; // A
-            }
+            let dst_offset = (row as usize) * unpadded_row_bytes;
+            argb_data[dst_offset..dst_offset + unpadded_row_bytes]
+                .copy_from_slice(&data[src_offset..src_offset + unpadded_row_bytes]);
         }
 
         drop(data);
@@ -288,22 +282,16 @@ impl VideoBufferPool {
 
         let data = buffer_slice.get_mapped_range();
 
-        // Convert RGBA -> ARGB and remove padding
+        // BGRA render target output matches Wayland ARGB byte layout directly.
+        // Just strip row padding (no per-pixel swizzle needed).
+        let unpadded_row_bytes = (self.width * 4) as usize;
         let mut argb_data = vec![0u8; (self.width * self.height * 4) as usize];
 
         for row in 0..self.height {
             let src_offset = (row * self.padded_bytes_per_row) as usize;
-            let dst_offset = (row * self.width * 4) as usize;
-
-            for col in 0..self.width {
-                let src_pixel = src_offset + (col * 4) as usize;
-                let dst_pixel = dst_offset + (col * 4) as usize;
-
-                argb_data[dst_pixel + 0] = data[src_pixel + 2]; // B
-                argb_data[dst_pixel + 1] = data[src_pixel + 1]; // G
-                argb_data[dst_pixel + 2] = data[src_pixel + 0]; // R
-                argb_data[dst_pixel + 3] = data[src_pixel + 3]; // A
-            }
+            let dst_offset = (row as usize) * unpadded_row_bytes;
+            argb_data[dst_offset..dst_offset + unpadded_row_bytes]
+                .copy_from_slice(&data[src_offset..src_offset + unpadded_row_bytes]);
         }
 
         drop(data);

@@ -44,16 +44,21 @@ bytemuck = { version = "1.14", features = ["derive"], optional = true }
 # Async
 tokio = { workspace = true }
 
-# Serialization
+# Configuration & Serialization
+forgeconf = { version = "0.4.1", features = [
+  "toml",
+  "validators",
+  "parse",
+], default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true }
-toml = "0.9.11+spec-1.1.0"
 
 # Utilities
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
+arc-swap = "1.7"
 memmap2 = "0.9"
 tempfile = "3.8"
 rayon = { workspace = true }
@@ -66,9 +71,14 @@ sysinfo = "0.37.2"
 
 [features]
 default = ["all"]
-video = ["dep:gstreamer", "dep:gstreamer-video", "dep:gstreamer-app", "dep:futures"]
+video = [
+  "dep:gstreamer",
+  "dep:gstreamer-video",
+  "dep:gstreamer-app",
+  "dep:futures",
+]
 gpu = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:futures"]
-profiling = []  # Enables performance profiling and detailed logging
+profiling = [] # Enables performance profiling and detailed logging
 all = ["video", "gpu"]
 
 [[bin]]

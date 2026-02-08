@@ -11,6 +11,11 @@ pub(super) fn update_transitions(
     qh: &QueueHandle<WallpaperDaemon>,
 ) -> Result<()> {
     for output_data in &mut app_data.outputs {
+        // Skip if compositor hasn't signaled readiness for this output
+        if !output_data.frame_ready {
+            continue;
+        }
+
         let Some(transition) = &output_data.transition else {
             continue; // No active transition
         };
@@ -24,12 +29,12 @@ pub(super) fn update_transitions(
             );
 
             // Commit the final pending wallpaper before clearing state
-            if let Some(pending_data) = &output_data.pending_wallpaper_data {
+            // Take ownership to avoid cloning — we'll clear it below anyway
+            if let Some(mut final_data) = output_data.pending_wallpaper_data.take() {
                 let width = output_data.width;
                 let height = output_data.height;
 
                 // Apply overlay if present
-                let mut final_data = pending_data.clone();
                 apply_overlay_or_warn!(
                     super::overlay::apply_overlay_to_frame,
                     output_data,
@@ -39,27 +44,26 @@ pub(super) fn update_transitions(
                     "frame after transition"
                 );
 
-                // Update buffer with final wallpaper - reuse if possible
-                if let Some(buffer) = &mut output_data.buffer {
-                    if buffer.width() == width && buffer.height() == height {
-                        buffer.write_image_data(&final_data)?;
-                    } else {
-                        // Wrong size, create new
-                        let mut new_buffer = crate::buffer::ShmBuffer::new(
-                            &app_data.shm.wl_shm(),
-                            width,
-                            height,
-                            qh,
-                        )?;
-                        new_buffer.write_image_data(&final_data)?;
-                        output_data.buffer = Some(new_buffer);
-                    }
+                // Update buffer with final wallpaper - reuse if released, otherwise create new
+                // IMPORTANT: Only reuse if the compositor has released the buffer (not still reading it)
+                let can_reuse = output_data.buffer.as_ref().is_some_and(|buf| {
+                    buf.width() == width && buf.height() == height && buf.is_released()
+                });
+
+                if can_reuse {
+                    // Safe to write directly — compositor is done with this buffer
+                    output_data
+                        .buffer
+                        .as_mut()
+                        .unwrap()
+                        .write_image_data(&final_data)?;
                 } else {
-                    // No buffer, create new
-                    let mut buffer =
+                    // Buffer is busy, wrong size, or missing — create a new one
+                    let mut new_buffer =
                         crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
-                    buffer.write_image_data(&final_data)?;
-                    output_data.buffer = Some(buffer);
+                    new_buffer.write_image_data(&final_data)?;
+                    // Move old busy buffer to pool to avoid tearing
+                    output_data.swap_buffer(new_buffer);
                 }
 
                 // Commit to Wayland
@@ -72,6 +76,13 @@ pub(super) fn update_transitions(
                     layer_surface
                         .wl_surface()
                         .damage_buffer(0, 0, width as i32, height as i32);
+
+                    // Request next frame callback before commit
+                    // frame() must come BEFORE commit() per Wayland protocol
+                    let wl_surface = layer_surface.wl_surface();
+                    wl_surface.frame(qh, wl_surface.clone());
+                    output_data.frame_ready = false;
+
                     layer_surface.wl_surface().commit();
                 }
             }
@@ -83,36 +94,42 @@ pub(super) fn update_transitions(
         }
 
         // Get the new frame data (pending wallpaper or current content)
-        let new_frame = if let Some(pending) = &output_data.pending_wallpaper_data {
-            pending.clone()
-        } else {
-            // No pending data, skip this transition update
-            continue;
+        let new_frame = match &output_data.pending_wallpaper_data {
+            Some(pending) => pending,
+            None => continue, // No pending data, skip this transition update
         };
 
-        // Blend the frames
-        let blended_frame = transition.blend_frames(&new_frame);
+        // Blend the frames (borrows new_frame, no clone needed)
+        // Returns None if GPU is warming up (async readback not ready yet)
+        let blended_frame = match transition.blend_frames(new_frame) {
+            Some(data) => data,
+            None => continue, // GPU warming up, skip this frame
+        };
 
         let width = output_data.width;
         let height = output_data.height;
 
-        // Create/update buffer with blended frame - reuse if possible
-        if let Some(buffer) = &mut output_data.buffer {
-            if buffer.width() == width && buffer.height() == height {
-                buffer.write_image_data(&blended_frame)?;
-            } else {
-                // Wrong size, create new
-                let mut new_buffer =
-                    crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
-                new_buffer.write_image_data(&blended_frame)?;
-                output_data.buffer = Some(new_buffer);
-            }
+        // Create/update buffer with blended frame - reuse if released, otherwise create new
+        // IMPORTANT: Only reuse if the compositor has released the buffer (not still reading it)
+        let can_reuse = output_data
+            .buffer
+            .as_ref()
+            .is_some_and(|buf| buf.width() == width && buf.height() == height && buf.is_released());
+
+        if can_reuse {
+            // Safe to write directly — compositor is done with this buffer
+            output_data
+                .buffer
+                .as_mut()
+                .unwrap()
+                .write_image_data(&blended_frame)?;
         } else {
-            // No buffer, create new
-            let mut buffer =
+            // Buffer is busy, wrong size, or missing — create a new one
+            let mut new_buffer =
                 crate::buffer::ShmBuffer::new(&app_data.shm.wl_shm(), width, height, qh)?;
-            buffer.write_image_data(&blended_frame)?;
-            output_data.buffer = Some(buffer);
+            new_buffer.write_image_data(&blended_frame)?;
+            // Move old busy buffer to pool to avoid tearing
+            output_data.swap_buffer(new_buffer);
         }
 
         // Attach and commit
@@ -125,6 +142,13 @@ pub(super) fn update_transitions(
             layer_surface
                 .wl_surface()
                 .damage_buffer(0, 0, width as i32, height as i32);
+
+            // Request next frame callback before commit
+            // frame() must come BEFORE commit() per Wayland protocol
+            let wl_surface = layer_surface.wl_surface();
+            wl_surface.frame(qh, wl_surface.clone());
+            output_data.frame_ready = false;
+
             layer_surface.wl_surface().commit();
         }
     }

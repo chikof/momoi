@@ -24,13 +24,42 @@ pub(in crate::wayland) use image::set_image_wallpaper;
 pub(in crate::wayland) use shader::set_shader_wallpaper;
 pub(in crate::wayland) use video::set_video_wallpaper;
 
+/// Remove VideoManagers that are no longer referenced by any output.
+///
+/// After switching an output away from video (to image/shader/color),
+/// the output's `video_path` is cleared. If no remaining output references
+/// a given video path, the VideoManager is orphaned and should be dropped
+/// to free GStreamer resources.
+#[cfg(feature = "video")]
+fn cleanup_orphaned_video_managers(app_data: &mut WallpaperDaemon) {
+    let referenced_paths: std::collections::HashSet<&String> = app_data
+        .outputs
+        .iter()
+        .filter_map(|o| o.video_path.as_ref())
+        .collect();
+
+    let initial_count = app_data.video_managers.len();
+    app_data
+        .video_managers
+        .retain(|path, _| referenced_paths.contains(path));
+
+    let removed = initial_count - app_data.video_managers.len();
+    if removed > 0 {
+        log::info!(
+            "Cleaned up {} orphaned VideoManager(s) ({} remaining)",
+            removed,
+            app_data.video_managers.len()
+        );
+    }
+}
+
 /// Main command handler dispatcher
 pub(super) fn handle_wallpaper_command(
     app_data: &mut WallpaperDaemon,
     cmd: WallpaperCommand,
     qh: &QueueHandle<WallpaperDaemon>,
 ) -> Result<()> {
-    match cmd {
+    let result = match cmd {
         WallpaperCommand::SetImage {
             path,
             output,
@@ -66,5 +95,11 @@ pub(super) fn handle_wallpaper_command(
             &app_data.output_state,
             output.as_deref(),
         ),
-    }
+    };
+
+    // Clean up VideoManagers no longer referenced by any output
+    #[cfg(feature = "video")]
+    cleanup_orphaned_video_managers(app_data);
+
+    result
 }

@@ -1,4 +1,5 @@
 use crate::gpu::pipeline_builder::{PipelineBuilder, bind_group_entries, create_pipeline_layout};
+use crate::gpu::render_ops;
 use crate::gpu::{GpuContext, GpuTexture, VideoBufferPool};
 
 use anyhow::Result;
@@ -6,6 +7,38 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use wgpu;
 use wgpu::util::DeviceExt;
+
+/// Cached GPU resources for shader rendering, keyed by output resolution.
+/// Eliminates per-frame GPU allocations on the shader hot path (60fps).
+/// Uses double-buffered async readback via `VideoBufferPool` to avoid GPU stalls.
+pub struct ShaderResources {
+    /// Reusable render target texture
+    pub target_texture: GpuTexture,
+    /// Reusable uniform buffer (updated via queue.write_buffer each frame)
+    pub uniform_buffer: wgpu::Buffer,
+    /// Reusable bind group (references the uniform buffer, never changes)
+    pub uniform_bind_group: wgpu::BindGroup,
+    /// Double-buffered staging pool for async GPU->CPU readback (no GPU stalls)
+    pub buffer_pool: VideoBufferPool,
+}
+
+/// Cached GPU resources for blend/transition rendering, keyed by output resolution.
+/// Eliminates per-frame GPU allocations during transition animations (60fps bursts).
+/// Uses double-buffered async readback via `VideoBufferPool` to avoid GPU stalls.
+pub struct BlendResources {
+    /// Reusable texture for the old frame (uploaded as BGRA, no CPU swizzle)
+    pub old_texture: GpuTexture,
+    /// Reusable texture for the new frame (uploaded as BGRA, no CPU swizzle)
+    pub new_texture: GpuTexture,
+    /// Reusable render target for blend output
+    pub target_texture: GpuTexture,
+    /// Reusable uniform buffer (updated via queue.write_buffer each frame)
+    pub uniform_buffer: wgpu::Buffer,
+    /// Reusable bind group (references cached textures + uniform buffer, never changes)
+    pub bind_group: wgpu::BindGroup,
+    /// Double-buffered staging pool for async GPU->CPU readback (no GPU stalls)
+    pub buffer_pool: VideoBufferPool,
+}
 
 /// GPU renderer for wallpaper content
 pub struct GpuRenderer {
@@ -54,6 +87,14 @@ pub struct GpuRenderer {
     /// Target texture pool: one render target per output resolution
     /// Keyed by (target_w, target_h). These are where scaled frames are rendered.
     video_target_textures: Arc<Mutex<std::collections::HashMap<(u32, u32), GpuTexture>>>,
+    /// Cached shader rendering resources, keyed by output resolution (width, height).
+    /// Eliminates per-frame GPU allocations for render target, uniform buffer, bind group,
+    /// and staging buffer on the shader hot path.
+    shader_resources: Mutex<std::collections::HashMap<(u32, u32), ShaderResources>>,
+    /// Cached blend/transition resources, keyed by output resolution (width, height).
+    /// Eliminates per-frame GPU allocations for source textures, render target, uniform buffer,
+    /// and staging buffer during transition animations.
+    blend_resources: Mutex<std::collections::HashMap<(u32, u32), BlendResources>>,
 }
 
 impl GpuRenderer {
@@ -252,147 +293,38 @@ impl GpuRenderer {
             video_buffer_pools: Arc::new(Mutex::new(std::collections::HashMap::new())),
             video_source_textures: Arc::new(Mutex::new(std::collections::HashMap::new())),
             video_target_textures: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            shader_resources: Mutex::new(std::collections::HashMap::new()),
+            blend_resources: Mutex::new(std::collections::HashMap::new()),
         })
     }
 
-    /// Render a solid color to a buffer (proof-of-concept)
+    /// Render a solid color to a buffer
     ///
-    /// This creates a simple colored texture on the GPU and renders it
-    /// to an output buffer that can be used with shared memory.
+    /// Fills the buffer with a single ARGB color value using CPU memset.
+    /// This is trivially fast and doesn't require a GPU roundtrip.
+    ///
+    /// # Arguments
+    /// * `width` - Output width
+    /// * `height` - Output height
+    /// * `color` - RGBA color `[R, G, B, A]`
+    ///
+    /// # Returns
+    /// ARGB8 buffer suitable for Wayland shared memory (BGRA in memory)
     pub fn render_solid_color(&self, width: u32, height: u32, color: [u8; 4]) -> Result<Vec<u8>> {
-        log::debug!(
-            "GPU rendering {}x{} solid color: {:?}",
-            width,
-            height,
-            color
-        );
+        log::debug!("Rendering {}x{} solid color: {:?}", width, height, color);
 
-        // Create output texture
-        let output_texture = self
-            .context
-            .device
-            .create_texture(&wgpu::TextureDescriptor {
-                label: Some("Output Texture"),
-                size: wgpu::Extent3d {
-                    width,
-                    height,
-                    depth_or_array_layers: 1,
-                },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                view_formats: &[],
-            });
+        let pixel_count = (width * height) as usize;
+        let mut argb_data = vec![0u8; pixel_count * 4];
 
-        let output_view = output_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        // ARGB format in Wayland is BGRA in memory (little-endian):
+        // byte[0]=B, byte[1]=G, byte[2]=R, byte[3]=A
+        let pixel: [u8; 4] = [color[2], color[1], color[0], color[3]]; // BGRA
 
-        // Create command encoder
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Render Encoder"),
-                });
-
-        // Clear to the specified color
-        {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Clear Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &output_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: color[0] as f64 / 255.0,
-                            g: color[1] as f64 / 255.0,
-                            b: color[2] as f64 / 255.0,
-                            a: color[3] as f64 / 255.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
+        for chunk in argb_data.chunks_exact_mut(4) {
+            chunk.copy_from_slice(&pixel);
         }
 
-        // Copy texture to buffer for CPU readback
-        // Note: bytes_per_row must be aligned to COPY_BYTES_PER_ROW_ALIGNMENT (256)
-        let bytes_per_row = width * 4;
-        let aligned_bytes_per_row = (bytes_per_row + 255) & !255; // Align to 256
-        let buffer_size = (aligned_bytes_per_row * height) as u64;
-
-        let output_buffer = self.context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Output Buffer"),
-            size: buffer_size,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-
-        encoder.copy_texture_to_buffer(
-            output_texture.as_image_copy(),
-            wgpu::TexelCopyBufferInfo {
-                buffer: &output_buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(aligned_bytes_per_row),
-                    rows_per_image: Some(height),
-                },
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        // Submit commands
-        self.context.queue.submit(std::iter::once(encoder.finish()));
-
-        // Map buffer and read data
-        let buffer_slice = output_buffer.slice(..);
-
-        let (sender, receiver) = futures::channel::oneshot::channel();
-        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-            sender.send(result).unwrap();
-        });
-
-        // Wait for mapping to complete
-        let _ = self.context.device.poll(wgpu::PollType::Wait {
-            submission_index: None,
-            timeout: None,
-        });
-        pollster::block_on(receiver).unwrap()?;
-
-        // Get mapped data
-        let data = buffer_slice.get_mapped_range();
-
-        // Convert RGBA to ARGB for Wayland, accounting for padding
-        let mut argb_data = vec![0u8; (width * height * 4) as usize];
-
-        for y in 0..height {
-            for x in 0..width {
-                let src_offset = (y * aligned_bytes_per_row + x * 4) as usize;
-                let dst_offset = ((y * width + x) * 4) as usize;
-
-                // Convert RGBA -> ARGB
-                argb_data[dst_offset + 0] = data[src_offset + 3]; // A
-                argb_data[dst_offset + 1] = data[src_offset + 0]; // R
-                argb_data[dst_offset + 2] = data[src_offset + 1]; // G
-                argb_data[dst_offset + 3] = data[src_offset + 2]; // B
-            }
-        }
-
-        drop(data);
-
-        output_buffer.unmap();
-
-        log::debug!("GPU render complete, {} bytes", argb_data.len());
+        log::debug!("Solid color render complete, {} bytes", argb_data.len());
 
         Ok(argb_data)
     }
@@ -432,60 +364,17 @@ impl GpuRenderer {
             dst_height
         );
 
-        // Upload source image to GPU
-        let source_texture = GpuTexture::from_rgba(
-            &self.context.device,
-            &self.context.queue,
+        render_ops::render_image(
+            &self.context,
+            &self.scale_pipeline,
             &self.texture_bind_group_layout,
             &self.sampler,
+            image_data,
             src_width,
             src_height,
-            image_data,
-        )?;
-
-        // Create render target at destination size
-        let target_texture = GpuTexture::create_render_target(
-            &self.context.device,
-            &self.texture_bind_group_layout,
-            &self.sampler,
             dst_width,
             dst_height,
-        )?;
-
-        // Render scaled image
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Image Render Encoder"),
-                });
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Image Scale Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target_texture.view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-
-            render_pass.set_pipeline(&self.scale_pipeline);
-            render_pass.set_bind_group(0, &source_texture.bind_group, &[]);
-            render_pass.draw(0..3, 0..1); // Full-screen triangle
-        }
-
-        self.context.queue.submit(std::iter::once(encoder.finish()));
-
-        // Read back to CPU as ARGB
-        target_texture.read_to_argb(&self.context.device, &self.context.queue)
+        )
     }
 
     /// Render an ARGB image (Wayland format) with GPU scaling
@@ -500,19 +389,17 @@ impl GpuRenderer {
         dst_width: u32,
         dst_height: u32,
     ) -> Result<Vec<u8>> {
-        // Convert ARGB -> RGBA for GPU
-        let mut rgba_data = vec![0u8; image_data.len()];
-
-        for i in 0..(image_data.len() / 4) {
-            let offset = i * 4;
-
-            rgba_data[offset + 0] = image_data[offset + 2]; // R
-            rgba_data[offset + 1] = image_data[offset + 1]; // G
-            rgba_data[offset + 2] = image_data[offset + 0]; // B
-            rgba_data[offset + 3] = image_data[offset + 3]; // A
-        }
-
-        self.render_image(&rgba_data, src_width, src_height, dst_width, dst_height)
+        render_ops::render_image_argb(
+            &self.context,
+            &self.scale_pipeline,
+            &self.texture_bind_group_layout,
+            &self.sampler,
+            image_data,
+            src_width,
+            src_height,
+            dst_width,
+            dst_height,
+        )
     }
 
     /// Render a BGRA video frame (GStreamer format) with GPU acceleration
@@ -716,6 +603,9 @@ impl GpuRenderer {
 
     /// Render a procedural shader effect
     ///
+    /// Uses cached GPU resources (render target, uniform buffer, bind group,
+    /// staging buffer) to eliminate per-frame GPU allocations on the 60fps hot path.
+    ///
     /// # Arguments
     /// * `shader_type` - Which shader to render (plasma, waves, etc.)
     /// * `width` - Output width
@@ -731,7 +621,7 @@ impl GpuRenderer {
         height: u32,
         time: f32,
         params: &common::ShaderParams,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>> {
         log::debug!(
             "GPU rendering {} shader: {}x{} at time {:.2}s",
             shader_type,
@@ -752,145 +642,38 @@ impl GpuRenderer {
             _ => anyhow::bail!("Unknown shader type: {}", shader_type),
         };
 
-        // Parse colors
-        let color1 = params
-            .color1
-            .as_ref()
-            .and_then(|c| common::ShaderParams::parse_color(c))
-            .unwrap_or((1.0, 0.0, 0.0)); // Default red
-
-        let color2 = params
-            .color2
-            .as_ref()
-            .and_then(|c| common::ShaderParams::parse_color(c))
-            .unwrap_or((0.0, 0.0, 1.0)); // Default blue
-
-        let color3 = params
-            .color3
-            .as_ref()
-            .and_then(|c| common::ShaderParams::parse_color(c))
-            .unwrap_or((0.0, 1.0, 0.0)); // Default green
-
-        // Create uniform buffer with shader parameters
-        #[repr(C)]
-        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-        struct ShaderUniforms {
-            time: f32,
-            width: f32,
-            height: f32,
-            speed: f32,
-            color1_r: f32,
-            color1_g: f32,
-            color1_b: f32,
-            scale: f32,
-            color2_r: f32,
-            color2_g: f32,
-            color2_b: f32,
-            intensity: f32,
-            color3_r: f32,
-            color3_g: f32,
-            color3_b: f32,
-            count: f32, // Using f32 since WGSL requires alignment
-        }
-
-        let uniforms = ShaderUniforms {
-            time,
-            width: width as f32,
-            height: height as f32,
-            speed: params.speed.unwrap_or(1.0),
-            color1_r: color1.0,
-            color1_g: color1.1,
-            color1_b: color1.2,
-            scale: params.scale.unwrap_or(1.0),
-            color2_r: color2.0,
-            color2_g: color2.1,
-            color2_b: color2.2,
-            intensity: params.intensity.unwrap_or(1.0),
-            color3_r: color3.0,
-            color3_g: color3.1,
-            color3_b: color3.2,
-            count: params.count.unwrap_or(100) as f32,
-        };
-
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Shader Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
-
-        // Create bind group for uniforms
-        let uniform_bind_group =
-            self.context
-                .device
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("Shader Uniform Bind Group"),
-                    layout: &self.shader_uniform_layout,
-                    entries: &[wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: uniform_buffer.as_entire_binding(),
-                    }],
-                });
-
-        // Create render target
-        let target_texture = GpuTexture::create_render_target(
-            &self.context.device,
+        render_ops::render_shader_cached(
+            &self.context,
+            pipeline,
+            &self.shader_uniform_layout,
             &self.texture_bind_group_layout,
             &self.sampler,
+            &self.shader_resources,
             width,
             height,
-        )?;
-
-        // Render shader
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Shader Render Encoder"),
-                });
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Shader Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target_texture.view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-
-            render_pass.set_pipeline(pipeline);
-            render_pass.set_bind_group(0, &uniform_bind_group, &[]);
-            render_pass.draw(0..3, 0..1); // Full-screen triangle
-        }
-
-        self.context.queue.submit(std::iter::once(encoder.finish()));
-
-        // Read back to CPU as ARGB
-        target_texture.read_to_argb(&self.context.device, &self.context.queue)
+            time,
+            params,
+        )
     }
 
     /// Blend two ARGB frames for GPU-accelerated transitions
     ///
+    /// Uses cached GPU resources (source textures, render target, uniform buffer,
+    /// staging buffer) to eliminate per-frame GPU allocations during transition
+    /// animations. Input ARGB frames are uploaded directly as BGRA textures
+    /// (zero CPU swizzle since Wayland ARGB is BGRA in memory on little-endian).
+    ///
     /// # Arguments
-    /// * `old_frame` - Previous frame (ARGB8)
-    /// * `new_frame` - New frame (ARGB8)
+    /// * `old_frame` - Previous frame (ARGB8 / BGRA in memory)
+    /// * `new_frame` - New frame (ARGB8 / BGRA in memory)
     /// * `width` - Frame width
     /// * `height` - Frame height
     /// * `progress` - Transition progress (0.0 to 1.0)
     /// * `transition_type` - Type of transition (0=fade, 1=wipe_left, etc.)
     ///
     /// # Returns
-    /// Blended ARGB8 buffer
+    /// * `Some(Vec<u8>)` - Blended ARGB8 buffer (previous frame via async readback)
+    /// * `None` - GPU not ready yet (first frame warmup), caller should use CPU fallback
     pub fn blend_frames(
         &self,
         old_frame: &[u8],
@@ -899,7 +682,7 @@ impl GpuRenderer {
         height: u32,
         progress: f32,
         transition_type: u32,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>> {
         log::debug!(
             "GPU blending frames: {}x{} progress={:.2}",
             width,
@@ -907,140 +690,20 @@ impl GpuRenderer {
             progress
         );
 
-        // Convert ARGB -> RGBA for GPU
-        let mut old_rgba = vec![0u8; old_frame.len()];
-        let mut new_rgba = vec![0u8; new_frame.len()];
-
-        for i in 0..(old_frame.len() / 4) {
-            let offset = i * 4;
-
-            old_rgba[offset + 0] = old_frame[offset + 2]; // R
-            old_rgba[offset + 1] = old_frame[offset + 1]; // G
-            old_rgba[offset + 2] = old_frame[offset + 0]; // B
-            old_rgba[offset + 3] = old_frame[offset + 3]; // A
-            new_rgba[offset + 0] = new_frame[offset + 2]; // R
-            new_rgba[offset + 1] = new_frame[offset + 1]; // G
-            new_rgba[offset + 2] = new_frame[offset + 0]; // B
-            new_rgba[offset + 3] = new_frame[offset + 3]; // A
-        }
-
-        // Create textures from both frames
-        let old_texture = GpuTexture::from_rgba(
-            &self.context.device,
-            &self.context.queue,
+        render_ops::blend_frames_cached(
+            &self.context,
+            &self.blend_pipeline,
+            &self.blend_bind_group_layout,
             &self.texture_bind_group_layout,
             &self.sampler,
+            &self.blend_resources,
+            old_frame,
+            new_frame,
             width,
             height,
-            &old_rgba,
-        )?;
-
-        let new_texture = GpuTexture::from_rgba(
-            &self.context.device,
-            &self.context.queue,
-            &self.texture_bind_group_layout,
-            &self.sampler,
-            width,
-            height,
-            &new_rgba,
-        )?;
-
-        // Create output texture
-        let target_texture = GpuTexture::create_render_target(
-            &self.context.device,
-            &self.texture_bind_group_layout,
-            &self.sampler,
-            width,
-            height,
-        )?;
-
-        // Create uniform buffer
-        #[repr(C)]
-        #[derive(Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-        struct BlendUniforms {
-            progress: f32,
-            transition_type: u32,
-            width: f32,
-            height: f32,
-        }
-
-        let uniforms = BlendUniforms {
             progress,
             transition_type,
-            width: width as f32,
-            height: height as f32,
-        };
-
-        let uniform_buffer =
-            self.context
-                .device
-                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Blend Uniforms"),
-                    contents: bytemuck::cast_slice(&[uniforms]),
-                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                });
-
-        // Create bind group
-        let bind_group = self
-            .context
-            .device
-            .create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("Blend Bind Group"),
-                layout: &self.blend_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&old_texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&new_texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ],
-            });
-
-        // Render blend
-        let mut encoder =
-            self.context
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("Blend Encoder"),
-                });
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Blend Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target_texture.view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-                multiview_mask: None,
-            });
-
-            render_pass.set_pipeline(&self.blend_pipeline);
-            render_pass.set_bind_group(0, &bind_group, &[]);
-            render_pass.draw(0..3, 0..1); // Full-screen triangle
-        }
-
-        self.context.queue.submit(std::iter::once(encoder.finish()));
-
-        // Read back to CPU as ARGB
-        target_texture.read_to_argb(&self.context.device, &self.context.queue)
+        )
     }
 
     /// Render an overlay effect on top of a base texture

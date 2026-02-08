@@ -1,25 +1,35 @@
 //! Frame data handling and processing
 //!
 //! This module manages video frame data, including:
-//! - Current frame storage
-//! - Frame availability signaling
+//! - Current frame storage (lock-free via ArcSwap)
+//! - Frame availability signaling (generation counter)
 //! - GPU rendering cache
 //! - Profiling timestamps
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use arc_swap::ArcSwap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(feature = "profiling")]
+use std::sync::Mutex;
+#[cfg(feature = "profiling")]
 use std::time::Instant;
 
 /// Manages video frame data and state
+///
+/// Uses lock-free `ArcSwap` for frame passing between GStreamer callback thread
+/// and render thread, eliminating mutex contention and per-frame clones.
 pub struct FrameHandler {
-    /// Current frame data (BGRA from GStreamer)
-    pub(super) current_frame: Arc<Mutex<Option<Vec<u8>>>>,
+    /// Current frame data (BGRA from GStreamer) - lock-free swap
+    pub(super) current_frame: Arc<ArcSwap<Vec<u8>>>,
 
-    /// Cached rendered frame (for async GPU readback fallback)
-    pub(super) cached_frame: Arc<Mutex<Option<Vec<u8>>>>,
+    /// Monotonically increasing generation counter - replaces bool flag
+    /// Incremented each time a new frame is stored. Readers compare their
+    /// last-seen generation to detect new frames atomically.
+    pub(super) frame_generation: Arc<AtomicU64>,
 
-    /// Flag indicating a new frame is available
-    pub(super) new_frame_available: Arc<AtomicBool>,
+    /// Cached rendered frame (for async GPU readback fallback) - lock-free swap
+    cached_frame: ArcSwap<Vec<u8>>,
 
     /// When GStreamer delivered the current frame (profiling only)
     #[cfg(feature = "profiling")]
@@ -30,22 +40,22 @@ impl FrameHandler {
     /// Create new frame handler
     pub fn new() -> Self {
         Self {
-            current_frame: Arc::new(Mutex::new(None)),
-            cached_frame: Arc::new(Mutex::new(None)),
-            new_frame_available: Arc::new(AtomicBool::new(false)),
+            current_frame: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            frame_generation: Arc::new(AtomicU64::new(0)),
+            cached_frame: ArcSwap::from_pointee(Vec::new()),
             #[cfg(feature = "profiling")]
             gstreamer_frame_time: Arc::new(Mutex::new(None)),
         }
     }
 
-    /// Get clone of current_frame for GStreamer callback
-    pub fn current_frame_handle(&self) -> Arc<Mutex<Option<Vec<u8>>>> {
+    /// Get handle to current_frame ArcSwap for GStreamer callback
+    pub fn current_frame_handle(&self) -> Arc<ArcSwap<Vec<u8>>> {
         Arc::clone(&self.current_frame)
     }
 
-    /// Get clone of new_frame_available for GStreamer callback
-    pub fn new_frame_flag_handle(&self) -> Arc<AtomicBool> {
-        Arc::clone(&self.new_frame_available)
+    /// Get handle to generation counter for GStreamer callback
+    pub fn generation_handle(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.frame_generation)
     }
 
     /// Get clone of gstreamer_frame_time for profiling
@@ -54,38 +64,42 @@ impl FrameHandler {
         Arc::clone(&self.gstreamer_frame_time)
     }
 
-    /// Check if a new frame is available
-    pub fn has_new_frame(&self) -> bool {
-        self.new_frame_available.load(Ordering::Acquire)
+    /// Get the current frame generation number
+    pub fn generation(&self) -> u64 {
+        self.frame_generation.load(Ordering::Acquire)
     }
 
-    /// Mark frame as consumed
-    pub fn consume_frame(&self) {
-        self.new_frame_available.store(false, Ordering::Release);
-    }
-
-    /// Get current frame data (BGRA format)
-    pub fn current_frame_bgra(&self) -> Option<Vec<u8>> {
-        self.current_frame.lock().ok()?.clone()
-    }
-
-    /// Get or set cached rendered frame
-    pub fn get_cached_frame(&self) -> Option<Vec<u8>> {
-        self.cached_frame.lock().ok()?.clone()
-    }
-
-    /// Update cached rendered frame
-    pub fn update_cached_frame(&self, frame: Vec<u8>) {
-        if let Ok(mut cache) = self.cached_frame.lock() {
-            *cache = Some(frame);
+    /// Get current frame data (BGRA format) - lock-free, no clone of underlying data
+    ///
+    /// Returns an `Arc<Vec<u8>>` so the caller shares ownership without copying.
+    /// The Arc is cheap to clone (just a ref count bump).
+    pub fn current_frame_bgra(&self) -> Option<Arc<Vec<u8>>> {
+        let frame = self.current_frame.load();
+        if frame.is_empty() {
+            None
+        } else {
+            Some(Arc::clone(&frame))
         }
+    }
+
+    /// Get cached rendered frame - lock-free, no clone
+    pub fn get_cached_frame(&self) -> Option<Arc<Vec<u8>>> {
+        let cached = self.cached_frame.load();
+        if cached.is_empty() {
+            None
+        } else {
+            Some(Arc::clone(&cached))
+        }
+    }
+
+    /// Update cached rendered frame (accepts Arc to avoid cloning)
+    pub fn update_cached_frame(&self, frame: Arc<Vec<u8>>) {
+        self.cached_frame.store(frame);
     }
 
     /// Clear cached frame
     pub fn clear_cached_frame(&self) {
-        if let Ok(mut cache) = self.cached_frame.lock() {
-            *cache = None;
-        }
+        self.cached_frame.store(Arc::new(Vec::new()));
     }
 
     /// Get profiling timestamp for current frame

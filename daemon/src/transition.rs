@@ -170,8 +170,8 @@ impl Transition {
     }
 
     /// Blend old and new frames based on current progress
-    /// Returns the blended frame data
-    pub fn blend_frames(&self, new_frame: &[u8]) -> Vec<u8> {
+    /// Returns the blended frame data, or None if GPU is warming up (first frame)
+    pub fn blend_frames(&self, new_frame: &[u8]) -> Option<Vec<u8>> {
         let progress = self.progress();
 
         // Try GPU blending first if available
@@ -180,7 +180,7 @@ impl Transition {
             if let Some(ref gpu) = self.gpu_renderer {
                 // Map transition type to GPU transition type
                 let gpu_transition_type = match self.transition_type {
-                    TransitionType::None => return new_frame.to_vec(),
+                    TransitionType::None => return Some(new_frame.to_vec()),
                     TransitionType::Fade => 0,
                     TransitionType::WipeLeft => 1,
                     TransitionType::WipeRight => 2,
@@ -190,7 +190,7 @@ impl Transition {
                     TransitionType::Outer => 6,
                     TransitionType::WipeAngle(_) | TransitionType::Random => {
                         // Fall back to CPU for unsupported types
-                        return self.blend_frames_cpu(new_frame, progress);
+                        return Some(self.blend_frames_cpu(new_frame, progress));
                     }
                 };
 
@@ -202,7 +202,8 @@ impl Transition {
                     progress,
                     gpu_transition_type,
                 ) {
-                    Ok(blended) => return blended,
+                    Ok(Some(blended)) => return Some(blended),
+                    Ok(None) => return None, // GPU warming up, no frame yet
                     Err(e) => {
                         log::warn!("GPU transition blending failed: {}, falling back to CPU", e);
                     }
@@ -211,7 +212,7 @@ impl Transition {
         }
 
         // CPU fallback
-        self.blend_frames_cpu(new_frame, progress)
+        Some(self.blend_frames_cpu(new_frame, progress))
     }
 
     /// CPU-based frame blending (fallback)
@@ -232,25 +233,20 @@ impl Transition {
 
     /// Fade transition: alpha blend between old and new
     fn blend_fade(&self, new_frame: &[u8], progress: f32) -> Vec<u8> {
-        let mut result = Vec::with_capacity(self.old_frame.len());
+        let mut result = vec![0u8; self.old_frame.len()];
+        let inv = 1.0 - progress;
 
-        // ARGB8888 format: 4 bytes per pixel
-        for i in (0..self.old_frame.len()).step_by(4) {
-            let old_b = self.old_frame[i] as f32;
-            let old_g = self.old_frame[i + 1] as f32;
-            let old_r = self.old_frame[i + 2] as f32;
-            let old_a = self.old_frame[i + 3] as f32;
-
-            let new_b = new_frame[i] as f32;
-            let new_g = new_frame[i + 1] as f32;
-            let new_r = new_frame[i + 2] as f32;
-            let new_a = new_frame[i + 3] as f32;
-
-            // Linear interpolation
-            result.push((old_b + (new_b - old_b) * progress) as u8);
-            result.push((old_g + (new_g - old_g) * progress) as u8);
-            result.push((old_r + (new_r - old_r) * progress) as u8);
-            result.push((old_a + (new_a - old_a) * progress) as u8);
+        // ARGB8888 format: 4 bytes per pixel, using chunks for auto-vectorization
+        for ((old, new), out) in self
+            .old_frame
+            .chunks_exact(4)
+            .zip(new_frame.chunks_exact(4))
+            .zip(result.chunks_exact_mut(4))
+        {
+            out[0] = (old[0] as f32 * inv + new[0] as f32 * progress) as u8;
+            out[1] = (old[1] as f32 * inv + new[1] as f32 * progress) as u8;
+            out[2] = (old[2] as f32 * inv + new[2] as f32 * progress) as u8;
+            out[3] = (old[3] as f32 * inv + new[3] as f32 * progress) as u8;
         }
 
         result
@@ -263,32 +259,31 @@ impl Transition {
         progress: f32,
         right_to_left: bool,
     ) -> Vec<u8> {
-        let mut result = self.old_frame.clone();
-        let stride = self.width as usize * 4; // 4 bytes per pixel
-
-        // Calculate the transition boundary (in pixels)
-        let boundary = if right_to_left {
-            self.width as f32 * (1.0 - progress)
+        let mut result = vec![0u8; self.old_frame.len()];
+        let stride = self.width as usize * 4;
+        let boundary_px = if right_to_left {
+            (self.width as f32 * (1.0 - progress)) as usize
         } else {
-            self.width as f32 * progress
-        };
+            (self.width as f32 * progress) as usize
+        }
+        .min(self.width as usize);
 
         for y in 0..self.height as usize {
             let row_start = y * stride;
-            for x in 0..self.width as usize {
-                let pixel_start = row_start + x * 4;
+            let split = boundary_px * 4;
 
-                // Determine if this pixel should show new or old frame
-                let show_new = if right_to_left {
-                    x as f32 >= boundary
-                } else {
-                    (x as f32) < boundary
-                };
-
-                if show_new {
-                    result[pixel_start..pixel_start + 4]
-                        .copy_from_slice(&new_frame[pixel_start..pixel_start + 4]);
-                }
+            if right_to_left {
+                // old pixels [0..split), new pixels [split..stride)
+                result[row_start..row_start + split]
+                    .copy_from_slice(&self.old_frame[row_start..row_start + split]);
+                result[row_start + split..row_start + stride]
+                    .copy_from_slice(&new_frame[row_start + split..row_start + stride]);
+            } else {
+                // new pixels [0..split), old pixels [split..stride)
+                result[row_start..row_start + split]
+                    .copy_from_slice(&new_frame[row_start..row_start + split]);
+                result[row_start + split..row_start + stride]
+                    .copy_from_slice(&self.old_frame[row_start + split..row_start + stride]);
             }
         }
 
@@ -297,29 +292,25 @@ impl Transition {
 
     /// Vertical wipe transition
     fn blend_wipe_vertical(&self, new_frame: &[u8], progress: f32, bottom_to_top: bool) -> Vec<u8> {
-        let mut result = self.old_frame.clone();
+        let mut result = vec![0u8; self.old_frame.len()];
         let stride = self.width as usize * 4;
-
-        // Calculate the transition boundary (in rows)
-        let boundary = if bottom_to_top {
-            self.height as f32 * (1.0 - progress)
+        let boundary_row = if bottom_to_top {
+            (self.height as f32 * (1.0 - progress)) as usize
         } else {
-            self.height as f32 * progress
-        };
+            (self.height as f32 * progress) as usize
+        }
+        .min(self.height as usize);
 
-        for y in 0..self.height as usize {
-            // Determine if this row should show new or old frame
-            let show_new = if bottom_to_top {
-                y as f32 >= boundary
-            } else {
-                (y as f32) < boundary
-            };
+        let split_byte = boundary_row * stride;
 
-            if show_new {
-                let row_start = y * stride;
-                result[row_start..row_start + stride]
-                    .copy_from_slice(&new_frame[row_start..row_start + stride]);
-            }
+        if bottom_to_top {
+            // old rows [0..split), new rows [split..end)
+            result[..split_byte].copy_from_slice(&self.old_frame[..split_byte]);
+            result[split_byte..].copy_from_slice(&new_frame[split_byte..]);
+        } else {
+            // new rows [0..split), old rows [split..end)
+            result[..split_byte].copy_from_slice(&new_frame[..split_byte]);
+            result[split_byte..].copy_from_slice(&self.old_frame[split_byte..]);
         }
 
         result
@@ -327,7 +318,7 @@ impl Transition {
 
     /// Diagonal wipe transition at a custom angle
     fn blend_wipe_angle(&self, new_frame: &[u8], progress: f32, angle: f32) -> Vec<u8> {
-        let mut result = self.old_frame.clone();
+        let mut result = vec![0u8; self.old_frame.len()];
         let stride = self.width as usize * 4;
 
         // Convert angle to radians
@@ -347,11 +338,13 @@ impl Transition {
                 // Calculate distance along the angle direction
                 let dist = x as f32 * cos_a + y as f32 * sin_a;
 
-                // Determine if this pixel should show new or old frame
-                if dist < boundary {
-                    result[pixel_start..pixel_start + 4]
-                        .copy_from_slice(&new_frame[pixel_start..pixel_start + 4]);
-                }
+                // Copy from new or old frame
+                let src = if dist < boundary {
+                    &new_frame[pixel_start..pixel_start + 4]
+                } else {
+                    &self.old_frame[pixel_start..pixel_start + 4]
+                };
+                result[pixel_start..pixel_start + 4].copy_from_slice(src);
             }
         }
 
@@ -360,7 +353,7 @@ impl Transition {
 
     /// Center expand transition (expand from center outward)
     fn blend_center(&self, new_frame: &[u8], progress: f32) -> Vec<u8> {
-        let mut result = self.old_frame.clone();
+        let mut result = vec![0u8; self.old_frame.len()];
         let stride = self.width as usize * 4;
 
         // Calculate center point
@@ -369,23 +362,27 @@ impl Transition {
 
         // Maximum distance from center to corner
         let max_radius = (center_x * center_x + center_y * center_y).sqrt();
-        let current_radius = max_radius * progress;
+        let current_radius_sq = (max_radius * progress) * (max_radius * progress);
 
         for y in 0..self.height as usize {
             let row_start = y * stride;
+            let dy = y as f32 - center_y;
+            let dy_sq = dy * dy;
+
             for x in 0..self.width as usize {
                 let pixel_start = row_start + x * 4;
 
-                // Calculate distance from center
+                // Calculate squared distance from center (avoid sqrt)
                 let dx = x as f32 - center_x;
-                let dy = y as f32 - center_y;
-                let dist = (dx * dx + dy * dy).sqrt();
+                let dist_sq = dx * dx + dy_sq;
 
-                // Show new frame if within current radius
-                if dist < current_radius {
-                    result[pixel_start..pixel_start + 4]
-                        .copy_from_slice(&new_frame[pixel_start..pixel_start + 4]);
-                }
+                // Copy from new frame if within current radius, else old frame
+                let src = if dist_sq < current_radius_sq {
+                    &new_frame[pixel_start..pixel_start + 4]
+                } else {
+                    &self.old_frame[pixel_start..pixel_start + 4]
+                };
+                result[pixel_start..pixel_start + 4].copy_from_slice(src);
             }
         }
 
@@ -394,7 +391,7 @@ impl Transition {
 
     /// Outer shrink transition (shrink from edges inward)
     fn blend_outer(&self, new_frame: &[u8], progress: f32) -> Vec<u8> {
-        let mut result = self.old_frame.clone();
+        let mut result = vec![0u8; self.old_frame.len()];
         let stride = self.width as usize * 4;
 
         // Calculate center point
@@ -403,23 +400,27 @@ impl Transition {
 
         // Maximum distance from center to corner
         let max_radius = (center_x * center_x + center_y * center_y).sqrt();
-        let current_radius = max_radius * (1.0 - progress);
+        let current_radius_sq = (max_radius * (1.0 - progress)) * (max_radius * (1.0 - progress));
 
         for y in 0..self.height as usize {
             let row_start = y * stride;
+            let dy = y as f32 - center_y;
+            let dy_sq = dy * dy;
+
             for x in 0..self.width as usize {
                 let pixel_start = row_start + x * 4;
 
-                // Calculate distance from center
+                // Calculate squared distance from center (avoid sqrt)
                 let dx = x as f32 - center_x;
-                let dy = y as f32 - center_y;
-                let dist = (dx * dx + dy * dy).sqrt();
+                let dist_sq = dx * dx + dy_sq;
 
-                // Show new frame if outside current radius
-                if dist > current_radius {
-                    result[pixel_start..pixel_start + 4]
-                        .copy_from_slice(&new_frame[pixel_start..pixel_start + 4]);
-                }
+                // Copy from new frame if outside current radius, else old frame
+                let src = if dist_sq > current_radius_sq {
+                    &new_frame[pixel_start..pixel_start + 4]
+                } else {
+                    &self.old_frame[pixel_start..pixel_start + 4]
+                };
+                result[pixel_start..pixel_start + 4].copy_from_slice(src);
             }
         }
 

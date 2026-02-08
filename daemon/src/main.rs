@@ -1,5 +1,6 @@
 mod buffer;
 mod config;
+mod error;
 mod gif_converter;
 mod ipc_server;
 mod macros;

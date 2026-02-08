@@ -76,6 +76,13 @@ pub(in crate::wayland) fn set_image_wallpaper(
             continue;
         }
 
+        // Clear video/shader state when switching to static image
+        #[cfg(feature = "video")]
+        {
+            output_data.video_path = None;
+        }
+        output_data.shader_manager = None;
+
         // Scale image to fit output
         // Try GPU acceleration first, fall back to CPU if unavailable
         let argb_data = {
@@ -226,10 +233,14 @@ pub(in crate::wayland) fn set_image_wallpaper(
                 .wl_surface()
                 .damage_buffer(0, 0, width as i32, height as i32);
 
+            // Request next frame callback before commit
+            // frame() must come BEFORE commit() per Wayland protocol
+            let wl_surface = layer_surface.wl_surface();
+            wl_surface.frame(qh, wl_surface.clone());
+            output_data.frame_ready = false;
+
             layer_surface.wl_surface().commit();
         }
-
-        // Mark buffer as busy (compositor is using it)
         // Just replace buffer directly
         // Swap buffer (moves old buffer to pool)
         output_data.buffer = Some(buffer);

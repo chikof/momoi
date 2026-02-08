@@ -11,10 +11,13 @@
 /// Architecture:
 /// - `context`: wgpu device/queue management
 /// - `renderer`: High-level rendering interface
-/// - `pipeline`: Render pipeline creation
+/// - `render_ops`: Specialized rendering operations (shaders, images, blending)
+/// - `pipeline_builder`: Render pipeline creation utilities
 /// - `texture`: Texture upload and management
+/// - `video_buffer_pool`: Async GPU readback for video frames
 pub mod context;
 mod pipeline_builder;
+pub mod render_ops;
 pub mod renderer;
 pub mod texture;
 mod video_buffer_pool;

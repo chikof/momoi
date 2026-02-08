@@ -133,8 +133,9 @@ impl ShaderManager {
         self.last_frame.elapsed() >= frame_duration
     }
 
-    /// Render current frame to ARGB buffer
-    pub fn render_frame(&mut self, width: u32, height: u32) -> Result<Vec<u8>> {
+    /// Render current frame to ARGB buffer.
+    /// Returns `None` if GPU async readback has no frame ready yet (first frame warmup).
+    pub fn render_frame(&mut self, width: u32, height: u32) -> Result<Option<Vec<u8>>> {
         // Update context
         self.context.resolution = (width, height);
         let elapsed = self.start_time.elapsed().as_secs_f32();
@@ -160,7 +161,7 @@ impl ShaderManager {
                 if let Some(name) = shader_name {
                     let start = std::time::Instant::now();
                     match gpu.render_shader(name, width, height, elapsed, &self.params) {
-                        Ok(data) => {
+                        Ok(Some(data)) => {
                             log::info!(
                                 "GPU shader '{}' rendered {}x{} in {:.2}ms",
                                 name,
@@ -168,7 +169,12 @@ impl ShaderManager {
                                 height,
                                 start.elapsed().as_secs_f32() * 1000.0
                             );
-                            return Ok(data);
+                            return Ok(Some(data));
+                        }
+                        Ok(None) => {
+                            // Async readback warming up (first frame), no data yet
+                            log::trace!("GPU shader '{}' async warmup (no frame yet)", name);
+                            return Ok(None);
                         }
                         Err(e) => {
                             log::warn!("GPU shader rendering failed: {}, falling back to CPU", e);
@@ -197,7 +203,7 @@ impl ShaderManager {
             start.elapsed().as_secs_f32() * 1000.0
         );
 
-        Ok(buffer)
+        Ok(Some(buffer))
     }
 
     /// Fallback for GPU-only shaders (too complex for CPU)

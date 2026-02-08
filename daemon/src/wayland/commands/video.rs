@@ -123,7 +123,13 @@ pub(in crate::wayland) fn set_video_wallpaper(
 
         output_data.video_path = Some(path_key);
 
-        log::info!("Set video wallpaper for output {}x{}", width, height);
+        log::info!(
+            "Set video wallpaper for output {}x{} (video_path={:?}, frame_ready={})",
+            width,
+            height,
+            output_data.video_path,
+            output_data.frame_ready
+        );
     }
 
     // Update shared state

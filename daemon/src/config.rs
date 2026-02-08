@@ -1,99 +1,102 @@
 use crate::validate_enum;
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
-use std::fs;
+use forgeconf::forgeconf;
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 /// Main configuration structure
-#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+#[derive(Debug, Clone, Serialize)]
+#[forgeconf]
 pub struct Config {
-    #[serde(default)]
+    #[field(name = "general")]
     pub general: GeneralSettings,
 
-    #[serde(default)]
+    #[field(default = None)]
     pub playlist: Option<PlaylistSettings>,
 
-    #[serde(default)]
+    #[field(default = vec![])]
     pub schedule: Vec<ScheduleEntry>,
 
-    #[serde(default)]
+    #[field(default = vec![])]
     pub output: Vec<OutputConfig>,
 
-    #[serde(default)]
+    #[field(default = vec![])]
     pub collection: Vec<Collection>,
 
-    #[serde(default)]
+    #[field(default = vec![])]
     pub shader_preset: Vec<ShaderPreset>,
 
-    #[serde(default)]
+    #[field(name = "advanced")]
     pub advanced: AdvancedSettings,
 }
 
 /// General daemon settings
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Serialize)]
+#[forgeconf]
 pub struct GeneralSettings {
-    #[serde(default = "default_log_level")]
+    #[field(default = "info".into())]
     pub log_level: String,
 
-    #[serde(default = "default_transition")]
+    #[field(default = "fade".into())]
     pub default_transition: String,
 
-    #[serde(default = "default_duration")]
+    #[field(default = 500)]
     pub default_duration: u64,
 
-    #[serde(default = "default_scale")]
+    #[field(default = "fill".into())]
     pub default_scale: String,
 }
 
-impl Default for GeneralSettings {
-    fn default() -> Self {
-        Self {
-            log_level: default_log_level(),
-            default_transition: default_transition(),
-            default_duration: default_duration(),
-            default_scale: default_scale(),
-        }
-    }
-}
-
-fn default_log_level() -> String {
-    "info".to_string()
-}
-
-fn default_transition() -> String {
-    "fade".to_string()
-}
-
-fn default_duration() -> u64 {
-    500
-}
-
-fn default_scale() -> String {
-    "fill".to_string()
-}
+// impl Default for GeneralSettings {
+//     fn default() -> Self {
+//         Self {
+//             log_level: default_log_level(),
+//             default_transition: default_transition(),
+//             default_duration: default_duration(),
+//             default_scale: default_scale(),
+//         }
+//     }
+// }
+//
+// fn default_log_level() -> String {
+//     "info".to_string()
+// }
+//
+// fn default_transition() -> String {
+//     "fade".to_string()
+// }
+//
+// fn default_duration() -> u64 {
+//     500
+// }
+//
+// fn default_scale() -> String {
+//     "fill".to_string()
+// }
 
 /// Playlist configuration
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Serialize)]
+#[forgeconf]
 pub struct PlaylistSettings {
-    #[serde(default)]
+    #[field(default = false)]
     pub enabled: bool,
 
-    #[serde(default = "default_interval")]
+    #[field(default = default_interval())]
     pub interval: u64,
 
-    #[serde(default)]
+    #[field(default = false)]
     pub shuffle: bool,
 
-    #[serde(default = "default_transition")]
+    #[field(default = "fade".into())]
     pub transition: String,
 
-    #[serde(default = "default_duration")]
+    #[field(default = 500)]
     pub transition_duration: u64,
 
-    #[serde(default)]
+    #[field(default = vec![])]
     pub sources: Vec<String>,
 
-    #[serde(default = "default_extensions")]
+    #[field(default = default_extensions())]
     pub extensions: Vec<String>,
 }
 
@@ -115,57 +118,61 @@ fn default_extensions() -> Vec<String> {
 }
 
 /// Time-based schedule entry
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[forgeconf]
+#[derive(Debug, Clone, Serialize)]
 pub struct ScheduleEntry {
     pub name: String,
     pub start_time: String, // Format: "HH:MM"
     pub end_time: String,   // Format: "HH:MM"
     pub wallpaper: String,
 
-    #[serde(default = "default_transition")]
+    #[field(name = "transition")]
     pub transition: String,
 
-    #[serde(default = "default_duration")]
+    #[field(name = "duration")]
     pub duration: u64,
 }
 
 /// Per-output configuration
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[forgeconf]
+#[derive(Debug, Clone, Serialize)]
 pub struct OutputConfig {
     pub name: String,
 
-    #[serde(default)]
+    #[field(default = None)]
     pub wallpaper: Option<String>,
 
-    #[serde(default = "default_scale")]
+    #[field(default = "fill".into())]
     pub scale: String,
 
-    #[serde(default = "default_transition")]
+    #[field(default = "fade".into())]
     pub transition: String,
 
-    #[serde(default = "default_duration")]
+    #[field(default = 500)]
     pub duration: u64,
 
-    #[serde(default)]
+    #[field(default = false)]
     pub playlist: bool,
 
-    #[serde(default)]
+    #[field(default = vec![])]
     pub playlist_sources: Vec<String>,
 }
 
 /// Named collection of wallpapers
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[forgeconf]
+#[derive(Debug, Clone, Serialize)]
 pub struct Collection {
     pub name: String,
 
-    #[serde(default)]
+    #[field(default = String::new())]
     pub description: String,
 
     pub wallpapers: Vec<String>,
 }
 
 /// Shader preset configuration
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[forgeconf]
+#[derive(Debug, Clone, Serialize)]
 pub struct ShaderPreset {
     /// Preset name
     pub name: String,
@@ -174,35 +181,35 @@ pub struct ShaderPreset {
     pub shader: String,
 
     /// Description
-    #[serde(default)]
+    #[field(default = String::new())]
     pub description: String,
 
     /// Animation speed multiplier
-    #[serde(default)]
+    #[field(default = None)]
     pub speed: Option<f32>,
 
     /// Primary color (hex format)
-    #[serde(default)]
+    #[field(default = None)]
     pub color1: Option<String>,
 
     /// Secondary color (hex format)
-    #[serde(default)]
+    #[field(default = None)]
     pub color2: Option<String>,
 
     /// Tertiary color (hex format)
-    #[serde(default)]
+    #[field(default = None)]
     pub color3: Option<String>,
 
     /// Scale parameter
-    #[serde(default)]
+    #[field(default = None)]
     pub scale: Option<f32>,
 
     /// Intensity parameter
-    #[serde(default)]
+    #[field(default = None)]
     pub intensity: Option<f32>,
 
     /// Count parameter
-    #[serde(default)]
+    #[field(default = None)]
     pub count: Option<u32>,
 }
 
@@ -222,120 +229,62 @@ impl ShaderPreset {
 }
 
 /// Advanced settings
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[forgeconf]
+#[derive(Debug, Clone, Serialize)]
 pub struct AdvancedSettings {
-    #[serde(default = "default_true")]
+    #[field(default = true)]
     pub enable_video: bool,
 
-    #[serde(default = "default_true")]
+    #[field(default = true)]
     pub video_muted: bool,
 
-    #[serde(default = "default_true")]
+    #[field(default = true)]
     pub video_loop: bool,
 
-    #[serde(default = "default_max_fps")]
+    #[field(default = 60)]
     pub max_fps: u32,
 
-    #[serde(default)]
+    #[field(default = 500)]
     pub cache_limit_mb: u64,
 
-    #[serde(default = "default_true")]
+    #[field(default = true)]
     pub preload_next: bool,
 
     // Resource management
-    #[serde(default = "default_performance_mode")]
+    #[field(default = "balanced".into())]
     pub performance_mode: String,
 
-    #[serde(default = "default_true")]
+    #[field(default = true)]
     pub auto_battery_mode: bool,
 
-    #[serde(default = "default_true")]
+    #[field(default = true)]
     pub enforce_memory_limits: bool,
 
-    #[serde(default = "default_memory_limit")]
+    #[field(default = 300)]
     pub max_memory_mb: usize,
 
-    #[serde(default = "default_cpu_threshold")]
+    #[field(default = 80.0)]
     pub cpu_threshold: f32,
 
     // Reconnection settings
-    #[serde(default = "default_false")]
+    #[field(default = false)]
     pub enable_reconnection: bool,
 
-    #[serde(default = "default_max_reconnection_retries")]
+    #[field(default = 10)]
     pub max_reconnection_retries: u32,
 
-    #[serde(default = "default_initial_reconnection_backoff")]
+    #[field(default = 1_000)]
     pub initial_reconnection_backoff_ms: u64,
 
-    #[serde(default = "default_max_reconnection_backoff")]
+    #[field(default = 10_000)]
     pub max_reconnection_backoff_ms: u64,
 
-    #[serde(default = "default_max_video_fps")]
+    #[field(default = default_max_video_fps())]
     pub max_video_fps: u32,
 }
 
-impl Default for AdvancedSettings {
-    fn default() -> Self {
-        Self {
-            enable_video: true,
-            video_muted: true,
-            video_loop: true,
-            max_fps: default_max_fps(),
-            cache_limit_mb: 500,
-            preload_next: true,
-            performance_mode: default_performance_mode(),
-            auto_battery_mode: true,
-            enforce_memory_limits: true,
-            max_memory_mb: default_memory_limit(),
-            cpu_threshold: default_cpu_threshold(),
-            enable_reconnection: default_false(),
-            max_reconnection_retries: default_max_reconnection_retries(),
-            initial_reconnection_backoff_ms: default_initial_reconnection_backoff(),
-            max_reconnection_backoff_ms: default_max_reconnection_backoff(),
-            max_video_fps: default_max_video_fps(),
-        }
-    }
-}
-
-fn default_true() -> bool {
-    true
-}
-
-fn default_false() -> bool {
-    false
-}
-
-fn default_max_fps() -> u32 {
-    60
-}
-
-fn default_performance_mode() -> String {
-    "balanced".to_string()
-}
-
-fn default_memory_limit() -> usize {
-    300
-}
-
-fn default_cpu_threshold() -> f32 {
-    80.0
-}
-
-fn default_max_reconnection_retries() -> u32 {
-    10
-}
-
-fn default_initial_reconnection_backoff() -> u64 {
-    1000
-}
-
-fn default_max_reconnection_backoff() -> u64 {
-    10000
-}
-
 pub fn default_max_video_fps() -> u32 {
-    15
+    30
 }
 
 impl Config {
@@ -352,18 +301,27 @@ impl Config {
                 "Config file not found at {}, using defaults",
                 path.display()
             );
-            return Ok(Self::default());
+            // Create a default config using forgeconf loader with no sources
+            let config = Self::loader()
+                .load()
+                .context("Failed to create default configuration")?;
+
+            config.validate()?;
+
+            return Ok(config);
         }
 
-        let contents = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read config file: {}", path.display()))?;
+        log::info!("Loading configuration from {}", path.display());
 
-        let config: Config = toml::from_str(&contents)
-            .with_context(|| format!("Failed to parse config file: {}", path.display()))?;
+        // Use forgeconf's ConfigFile to load from the specified path
+        let config_file =
+            forgeconf::ConfigFile::new(path.to_str().context("Invalid UTF-8 in path")?);
+        let config = Self::loader()
+            .add_source(config_file)
+            .load()
+            .with_context(|| format!("Failed to load config from {}", path.display()))?;
 
-        log::info!("Loaded configuration from {}", path.display());
         config.validate()?;
-
         Ok(config)
     }
 
@@ -460,6 +418,22 @@ impl Config {
     pub fn get_collection(&self, name: &str) -> Option<&Collection> {
         self.collection.iter().find(|c| c.name == name)
     }
+
+    /// Create a default configuration (primarily for testing)
+    #[cfg(test)]
+    fn default_for_testing() -> Self {
+        Self::loader()
+            .load()
+            .expect("Failed to create default config")
+    }
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::loader()
+            .load()
+            .expect("Failed to create default config")
+    }
 }
 
 #[cfg(test)]
@@ -468,7 +442,7 @@ mod tests {
 
     #[test]
     fn test_default_config() {
-        let config = Config::default();
+        let config = Config::default_for_testing();
         assert_eq!(config.general.log_level, "info");
         assert_eq!(config.general.default_transition, "fade");
         assert_eq!(config.general.default_duration, 500);
@@ -476,7 +450,7 @@ mod tests {
 
     #[test]
     fn test_validate_transition() {
-        let config = Config::default();
+        let config = Config::default_for_testing();
         assert!(config.validate_transition("fade").is_ok());
         assert!(config.validate_transition("wipe-left").is_ok());
         assert!(config.validate_transition("random").is_ok());
@@ -485,7 +459,7 @@ mod tests {
 
     #[test]
     fn test_validate_time() {
-        let config = Config::default();
+        let config = Config::default_for_testing();
         assert!(config.validate_time("06:00").is_ok());
         assert!(config.validate_time("23:59").is_ok());
         assert!(config.validate_time("24:00").is_err());
@@ -572,8 +546,8 @@ mod tests {
 
     #[test]
     fn test_config_with_presets() {
-        // Test parsing config with shader presets
-        let toml = r#"
+        // Test parsing config with shader presets using forgeconf
+        let toml_content = r#"
 [general]
 log_level = "info"
 
@@ -592,7 +566,14 @@ speed = 3.0
 count = 500
 "#;
 
-        let config: Config = toml::from_str(toml).unwrap();
+        // Parse using forgeconf's parse_toml
+        use forgeconf::parse_toml;
+        let node = parse_toml(toml_content).expect("Failed to parse TOML");
+
+        // Convert to Config using FromNode
+        use forgeconf::FromNode;
+        let config = Config::from_node(&node, "").expect("Failed to convert to Config");
+
         assert_eq!(config.shader_preset.len(), 2);
 
         let calm = &config.shader_preset[0];

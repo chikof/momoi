@@ -155,6 +155,8 @@ pub struct OverlayManager {
     overlay: OverlayShader,
     time: Instant,
     frame: u64,
+    /// Reusable scratch buffer for effects that can't operate in-place
+    scratch_buffer: Vec<u8>,
 }
 
 impl OverlayManager {
@@ -164,6 +166,7 @@ impl OverlayManager {
             overlay,
             time: Instant::now(),
             frame: 0,
+            scratch_buffer: Vec::new(),
         }
     }
 
@@ -306,8 +309,15 @@ impl OverlayManager {
     }
 
     /// Apply chromatic aberration (RGB split)
-    fn apply_chromatic_aberration(&self, buffer: &mut [u8], width: u32, height: u32, offset: f32) {
-        let mut new_buffer = buffer.to_vec();
+    fn apply_chromatic_aberration(
+        &mut self,
+        buffer: &mut [u8],
+        width: u32,
+        height: u32,
+        offset: f32,
+    ) {
+        // Reuse scratch buffer across frames to avoid per-frame allocation
+        self.scratch_buffer.resize(buffer.len(), 0);
         let offset_i = offset as i32;
 
         for y in 0..height {
@@ -322,13 +332,14 @@ impl OverlayManager {
                 let bx = (x as i32 - offset_i).clamp(0, width as i32 - 1) as u32;
                 let b_idx = ((y * width + bx) * 4) as usize;
 
-                new_buffer[idx] = buffer[b_idx]; // B (shifted left)
-                new_buffer[idx + 1] = buffer[idx + 1]; // G (unchanged)
-                new_buffer[idx + 2] = buffer[r_idx + 2]; // R (shifted right)
+                self.scratch_buffer[idx] = buffer[b_idx]; // B (shifted left)
+                self.scratch_buffer[idx + 1] = buffer[idx + 1]; // G (unchanged)
+                self.scratch_buffer[idx + 2] = buffer[r_idx + 2]; // R (shifted right)
+                self.scratch_buffer[idx + 3] = buffer[idx + 3]; // A (unchanged)
             }
         }
 
-        buffer.copy_from_slice(&new_buffer);
+        buffer.copy_from_slice(&self.scratch_buffer);
     }
 
     /// Apply CRT effect (combines scanlines and slight curvature simulation)
@@ -365,8 +376,6 @@ impl OverlayManager {
 
     /// Apply pixelate effect
     fn apply_pixelate(&self, buffer: &mut [u8], width: u32, height: u32, pixel_size: u32) {
-        let mut new_buffer = buffer.to_vec();
-
         for block_y in (0..height).step_by(pixel_size as usize) {
             for block_x in (0..width).step_by(pixel_size as usize) {
                 // Calculate average color of block
@@ -375,8 +384,11 @@ impl OverlayManager {
                 let mut avg_r = 0u32;
                 let mut count = 0u32;
 
-                for y in block_y..(block_y + pixel_size).min(height) {
-                    for x in block_x..(block_x + pixel_size).min(width) {
+                let max_y = (block_y + pixel_size).min(height);
+                let max_x = (block_x + pixel_size).min(width);
+
+                for y in block_y..max_y {
+                    for x in block_x..max_x {
                         let idx = ((y * width + x) * 4) as usize;
                         avg_b += buffer[idx] as u32;
                         avg_g += buffer[idx + 1] as u32;
@@ -386,24 +398,22 @@ impl OverlayManager {
                 }
 
                 if count > 0 {
-                    avg_b /= count;
-                    avg_g /= count;
-                    avg_r /= count;
+                    let b = (avg_b / count) as u8;
+                    let g = (avg_g / count) as u8;
+                    let r = (avg_r / count) as u8;
 
-                    // Fill block with average color
-                    for y in block_y..(block_y + pixel_size).min(height) {
-                        for x in block_x..(block_x + pixel_size).min(width) {
+                    // Fill block with average color (in-place)
+                    for y in block_y..max_y {
+                        for x in block_x..max_x {
                             let idx = ((y * width + x) * 4) as usize;
-                            new_buffer[idx] = avg_b as u8;
-                            new_buffer[idx + 1] = avg_g as u8;
-                            new_buffer[idx + 2] = avg_r as u8;
+                            buffer[idx] = b;
+                            buffer[idx + 1] = g;
+                            buffer[idx + 2] = r;
                         }
                     }
                 }
             }
         }
-
-        buffer.copy_from_slice(&new_buffer);
     }
 
     /// Apply color tint overlay

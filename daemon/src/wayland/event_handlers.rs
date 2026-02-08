@@ -42,10 +42,20 @@ impl CompositorHandler for WallpaperDaemon {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
+        surface: &wl_surface::WlSurface,
         _time: u32,
     ) {
-        // Handle frame callbacks for animations
+        // Compositor signals it is ready for the next frame on this surface.
+        // Match the surface to one of our outputs and mark it ready.
+        for output_data in &mut self.outputs {
+            if let Some(layer_surface) = &output_data.layer_surface {
+                if layer_surface.wl_surface() == surface {
+                    output_data.frame_ready = true;
+                    return;
+                }
+            }
+        }
+        log::debug!("Frame callback for unknown surface");
     }
 
     fn surface_enter(
@@ -181,8 +191,17 @@ impl LayerShellHandler for WallpaperDaemon {
                         // Fill with dark gray (#1e1e1e)
                         buffer.fill_color(0x1e, 0x1e, 0x1e, 0xff);
 
-                        // Attach buffer and commit
+                        // Attach buffer, mark damage, request frame callback, and commit.
+                        // IMPORTANT: frame() must come BEFORE commit() per the Wayland
+                        // protocol — the callback is part of the pending state that
+                        // gets applied on commit.
                         layer.wl_surface().attach(Some(buffer.buffer()), 0, 0);
+                        layer
+                            .wl_surface()
+                            .damage_buffer(0, 0, width as i32, height as i32);
+                        let wl_surface = layer.wl_surface();
+                        wl_surface.frame(qh, wl_surface.clone());
+                        output_data.frame_ready = false;
                         layer.wl_surface().commit();
 
                         // Mark buffer as busy (compositor is using it)
@@ -192,10 +211,21 @@ impl LayerShellHandler for WallpaperDaemon {
                     }
                     Err(e) => {
                         log::error!("Failed to create buffer: {}", e);
+
+                        // Request next frame callback even on failure
+                        // frame() must come BEFORE commit()
+                        let wl_surface = layer.wl_surface();
+                        wl_surface.frame(qh, wl_surface.clone());
+                        output_data.frame_ready = false;
                         layer.wl_surface().commit();
                     }
                 }
             } else {
+                // Request next frame callback, then commit
+                // frame() must come BEFORE commit()
+                let wl_surface = layer.wl_surface();
+                wl_surface.frame(qh, wl_surface.clone());
+                output_data.frame_ready = false;
                 layer.wl_surface().commit();
             }
         }

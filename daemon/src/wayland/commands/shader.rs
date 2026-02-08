@@ -79,6 +79,12 @@ pub(in crate::wayland) fn set_shader_wallpaper(
             continue;
         }
 
+        // Clear video state when switching to shader
+        #[cfg(feature = "video")]
+        {
+            output_data.video_path = None;
+        }
+
         // Create shader manager for this output
         let shader_mgr = crate::shader_manager::ShaderManager::new(
             shader,

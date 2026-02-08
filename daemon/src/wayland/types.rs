@@ -58,6 +58,9 @@ pub struct OutputData {
     #[allow(dead_code)] // Scale field for future HiDPI support
     pub(super) scale: f64,
     pub(super) configured: bool,
+    /// Whether the compositor has signaled readiness for a new frame via frame callback.
+    /// Starts `true` so the first frame is always rendered immediately.
+    pub(super) frame_ready: bool,
     /// DEPRECATED: Use video_path instead (GPU scaling allows single VideoManager per video)
     #[deprecated]
     #[allow(dead_code)] // Deprecated field kept during migration period

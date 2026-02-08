@@ -9,6 +9,7 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
@@ -42,7 +43,6 @@ pub struct VideoManager {
     height: u32,
 
     /// Target FPS limit (from config)
-    #[allow(dead_code)]
     target_fps: u32,
 
     /// Whether video is playing
@@ -50,6 +50,9 @@ pub struct VideoManager {
 
     /// Loop the video
     should_loop: bool,
+
+    /// Last frame generation seen by the render thread
+    last_seen_generation: u64,
 
     /// Optional GPU renderer for hardware-accelerated video display
     #[cfg(feature = "gpu")]
@@ -94,18 +97,21 @@ impl VideoManager {
         let detected_fps = pipeline::detect_fps(&pipeline);
         let stats = VideoStats::new(detected_fps);
 
-        // Setup frame callback with proper handles
+        // Setup frame callback with lock-free handles
         pipeline::setup_frame_callback(
             &app_sink,
             frames.current_frame_handle(),
-            frames.new_frame_flag_handle(),
+            frames.generation_handle(),
             stats.frames_dropped_handle(),
             #[cfg(feature = "profiling")]
             frames.frame_time_handle(),
         );
 
-        // Assume 30 FPS by default (will be updated when we detect actual FPS)
-        let frame_duration = Duration::from_millis(33);
+        // Assume 30 FPS by default (will be updated when we detect actual FPS).
+        // Clamp to respect max_video_fps config.
+        let default_duration = Duration::from_millis(33);
+        let max_fps_duration = Duration::from_secs_f64(1.0 / target_fps as f64);
+        let frame_duration = default_duration.max(max_fps_duration);
 
         #[cfg(feature = "gpu")]
         {
@@ -137,6 +143,7 @@ impl VideoManager {
             is_playing: false,
             should_loop: true,
             target_fps,
+            last_seen_generation: 0,
             #[cfg(feature = "gpu")]
             gpu_renderer,
         })
@@ -144,11 +151,12 @@ impl VideoManager {
 
     /// Start video playback
     pub fn play(&mut self) -> Result<()> {
-        log::info!("Starting video playback");
+        log::info!("Starting video playback (pipeline -> Playing)");
         self.pipeline
             .set_state(gst::State::Playing)
             .context("Failed to set pipeline to Playing state")?;
         self.is_playing = true;
+        log::info!("Pipeline set to Playing successfully, is_playing=true");
         Ok(())
     }
 
@@ -167,7 +175,7 @@ impl VideoManager {
     /// Returns decoded video frame at the VideoManager's resolution
     /// Outputs can then scale/convert this to their specific resolutions
     #[allow(dead_code)] // Alternative API for raw frame access
-    pub fn current_frame_bgra(&self) -> Option<Vec<u8>> {
+    pub fn current_frame_bgra(&self) -> Option<Arc<Vec<u8>>> {
         self.frames.current_frame_bgra()
     }
 
@@ -194,7 +202,22 @@ impl VideoManager {
         #[cfg(feature = "profiling")]
         let render_request_time = Instant::now();
 
-        let bgra_data = self.frames.current_frame_bgra()?;
+        let bgra_data = match self.frames.current_frame_bgra() {
+            Some(data) => data,
+            None => {
+                log::debug!(
+                    "current_frame_data_scaled: no BGRA frame available from GStreamer (frame empty)"
+                );
+                return None;
+            }
+        };
+
+        log::trace!(
+            "current_frame_data_scaled: have BGRA frame ({} bytes), target {}x{}",
+            bgra_data.len(),
+            target_width,
+            target_height
+        );
 
         // Get GStreamer frame delivery time for profiling
         #[cfg(feature = "profiling")]
@@ -257,12 +280,16 @@ impl VideoManager {
 
                         // Update cache occasionally as fallback
                         if self.stats.frames_rendered.is_multiple_of(30) {
-                            self.frames.update_cached_frame(argb_data.clone());
                             log::debug!(
                                 "Updated cached_frame (frame {}), size={}MB",
                                 self.stats.frames_rendered,
                                 argb_data.len() / 1024 / 1024
                             );
+                            // Cache stores Arc, return the data directly.
+                            // This clone only happens every 30th frame (~1-2Hz).
+                            let cached = argb_data.clone();
+                            self.frames.update_cached_frame(Arc::new(argb_data));
+                            return Some(cached);
                         }
 
                         return Some(argb_data);
@@ -282,7 +309,7 @@ impl VideoManager {
                         }
 
                         if let Some(cached) = self.frames.get_cached_frame() {
-                            return Some(cached);
+                            return Some(cached.to_vec());
                         }
 
                         // No cached frame available, fall through to CPU path
@@ -301,13 +328,14 @@ impl VideoManager {
 
         // CPU path: BGRA from GStreamer is already in correct format for Wayland
         log::trace!("Using CPU video rendering path");
-        Some(bgra_data)
+        Some(bgra_data.to_vec())
     }
 
     /// Check if a new frame is available and should be displayed
     /// Returns true if there's a new frame to render
     pub fn update(&mut self) -> bool {
         if !self.is_playing {
+            log::trace!("VideoManager::update - not playing");
             return false;
         }
 
@@ -321,13 +349,22 @@ impl VideoManager {
         {
             let fps = framerate.numer() as f64 / framerate.denom() as f64;
             self.stats.detected_fps = Some(fps);
-            self.frame_duration = Duration::from_secs_f64(1.0 / fps);
 
+            // Clamp frame duration to respect max_video_fps config.
+            // Use the slower of the two rates (larger duration) so we never
+            // exceed the configured limit.
+            let video_duration = Duration::from_secs_f64(1.0 / fps);
+            let max_fps_duration = Duration::from_secs_f64(1.0 / self.target_fps as f64);
+            self.frame_duration = video_duration.max(max_fps_duration);
+
+            let effective_fps = 1.0 / self.frame_duration.as_secs_f64();
             log::info!(
-                "Detected video FPS: {:.2} ({}/{}), frame duration: {:.1}ms",
+                "Detected video FPS: {:.2} ({}/{}), target_fps limit: {}, effective FPS: {:.2}, frame duration: {:.1}ms",
                 fps,
                 framerate.numer(),
                 framerate.denom(),
+                self.target_fps,
+                effective_fps,
                 self.frame_duration.as_secs_f64() * 1000.0
             );
         }
@@ -366,9 +403,24 @@ impl VideoManager {
             }
         }
 
-        // Check if we have a new frame available using atomic flag
-        if self.frames.has_new_frame() {
-            self.frames.consume_frame();
+        // Check if we have a new frame available using generation counter (lock-free)
+        let current_gen = self.frames.generation();
+        if current_gen > self.last_seen_generation {
+            // Count dropped frames: if generation jumped by more than 1,
+            // intermediate frames were overwritten before we could render them
+            let skipped = current_gen - self.last_seen_generation - 1;
+            if skipped > 0 {
+                self.stats
+                    .frames_dropped
+                    .fetch_add(skipped, Ordering::Relaxed);
+                log::trace!(
+                    "Skipped {} video frames (gen {} -> {})",
+                    skipped,
+                    self.last_seen_generation,
+                    current_gen
+                );
+            }
+            self.last_seen_generation = current_gen;
 
             // Respect video's native frame rate - don't display faster than source FPS
             let min_frame_time = self.frame_duration;
@@ -419,6 +471,11 @@ impl VideoManager {
 
             true
         } else {
+            log::trace!(
+                "VideoManager::update - no new frame (gen={}, last_seen={})",
+                current_gen,
+                self.last_seen_generation
+            );
             false
         }
     }

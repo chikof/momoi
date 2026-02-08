@@ -1,15 +1,20 @@
 //! GStreamer pipeline setup and configuration
 //!
 //! This module handles the creation and configuration of GStreamer pipelines
-//! for hardware-accelerated video decoding.
+//! for video decoding. Uses `decodebin` for automatic codec/container detection,
+//! supporting H.264, H.265, VP9, AV1 in MP4, WebM, MKV, and other containers.
+//! Hardware acceleration (VA-API, NVDEC, etc.) is used automatically when available.
 
 use anyhow::{Context, Result};
+use arc_swap::ArcSwap;
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 use std::path::Path;
-use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+#[cfg(feature = "profiling")]
 use std::time::Instant;
 
 /// Initialize GStreamer (idempotent, safe to call multiple times)
@@ -22,11 +27,18 @@ pub fn initialize_gstreamer() {
     });
 }
 
-/// Build a hardware-accelerated video pipeline
+/// Build a video decoding pipeline using `decodebin` for automatic codec detection.
 ///
-/// Uses VA-API for hardware decoding and post-processing:
-/// - `vah264dec`: Hardware H.264 decoder (outputs NV12)
-/// - `vapostproc`: Hardware scaling + color conversion to BGRA
+/// Uses GStreamer's element API (not string parsing) to avoid path escaping issues.
+/// `decodebin` automatically selects the best decoder (hardware-accelerated when
+/// available, software fallback otherwise) for any supported container and codec:
+/// - Containers: MP4, WebM, MKV, AVI, MOV, OGG, etc.
+/// - Codecs: H.264, H.265/HEVC, VP8, VP9, AV1, etc.
+///
+/// Pipeline structure:
+/// ```text
+/// filesrc -> decodebin -> videoconvert -> videoscale -> capsfilter(BGRA,WxH) -> appsink
+/// ```
 ///
 /// # Arguments
 ///
@@ -45,25 +57,128 @@ pub fn build_pipeline(
     let path = path.as_ref();
     log::info!("Creating GStreamer pipeline for: {}", path.display());
 
-    // Hardware-accelerated pipeline
-    let pipeline_str = format!(
-        "filesrc location={} ! qtdemux ! h264parse ! vah264dec ! vapostproc ! video/x-raw,format=BGRA,width={},height={} ! appsink name=sink",
+    // Build pipeline using element API to avoid path escaping issues
+    let pipeline = gst::Pipeline::new();
+
+    // Source: reads the file
+    let filesrc = gst::ElementFactory::make("filesrc")
+        .property(
+            "location",
+            path.to_str().context("Video path contains invalid UTF-8")?,
+        )
+        .build()
+        .context("Failed to create filesrc element")?;
+
+    // Decoder: auto-detects container and codec, uses HW accel when available
+    let decodebin = gst::ElementFactory::make("decodebin")
+        .build()
+        .context("Failed to create decodebin element")?;
+
+    // Color space converter: handles NV12/YUV -> BGRA conversion
+    let videoconvert = gst::ElementFactory::make("videoconvert")
+        .build()
+        .context("Failed to create videoconvert element")?;
+
+    // Scaler: resizes to target resolution
+    let videoscale = gst::ElementFactory::make("videoscale")
+        .build()
+        .context("Failed to create videoscale element")?;
+
+    // Caps filter: enforce output format and resolution
+    let caps = gst::Caps::builder("video/x-raw")
+        .field("format", "BGRA")
+        .field("width", target_width as i32)
+        .field("height", target_height as i32)
+        .build();
+
+    let capsfilter = gst::ElementFactory::make("capsfilter")
+        .property("caps", &caps)
+        .build()
+        .context("Failed to create capsfilter element")?;
+
+    // Sink: delivers frames to our application
+    let appsink = gst::ElementFactory::make("appsink")
+        .name("sink")
+        .build()
+        .context("Failed to create appsink element")?;
+
+    // Add all elements to the pipeline
+    pipeline
+        .add_many([
+            &filesrc,
+            &decodebin,
+            &videoconvert,
+            &videoscale,
+            &capsfilter,
+            &appsink,
+        ])
+        .context("Failed to add elements to pipeline")?;
+
+    // Link static elements: filesrc -> decodebin (static link)
+    gst::Element::link_many([&filesrc, &decodebin])
+        .context("Failed to link filesrc to decodebin")?;
+
+    // Link post-decode chain: videoconvert -> videoscale -> capsfilter -> appsink
+    gst::Element::link_many([&videoconvert, &videoscale, &capsfilter, &appsink])
+        .context("Failed to link video processing chain")?;
+
+    // Connect decodebin's dynamic pad to videoconvert.
+    // decodebin creates pads dynamically when it discovers the stream type.
+    let convert_weak = videoconvert.downgrade();
+    decodebin.connect_pad_added(move |_decodebin, src_pad| {
+        let Some(videoconvert) = convert_weak.upgrade() else {
+            log::warn!("decodebin pad-added: videoconvert element already dropped");
+            return;
+        };
+
+        // Only link video pads (ignore audio, subtitles, etc.)
+        let pad_caps = src_pad
+            .current_caps()
+            .or_else(|| Some(src_pad.query_caps(None)));
+        if let Some(caps) = pad_caps {
+            let structure_name = caps
+                .structure(0)
+                .map(|s| s.name().to_string())
+                .unwrap_or_default();
+
+            if !structure_name.starts_with("video/") {
+                log::debug!("Ignoring non-video pad from decodebin: {}", structure_name);
+                return;
+            }
+        }
+
+        let sink_pad = match videoconvert.static_pad("sink") {
+            Some(pad) => pad,
+            None => {
+                log::error!("videoconvert has no sink pad");
+                return;
+            }
+        };
+
+        if sink_pad.is_linked() {
+            log::debug!("videoconvert sink pad already linked, ignoring additional video stream");
+            return;
+        }
+
+        match src_pad.link(&sink_pad) {
+            Ok(_) => {
+                log::info!("Linked decodebin to videoconvert successfully");
+            }
+            Err(e) => {
+                log::error!("Failed to link decodebin to videoconvert: {:?}", e);
+            }
+        }
+    });
+
+    log::debug!(
+        "GStreamer pipeline: filesrc({}) -> decodebin -> videoconvert -> videoscale -> BGRA {}x{} -> appsink",
         path.display(),
         target_width,
         target_height
     );
 
-    log::debug!("GStreamer pipeline: {}", pipeline_str);
-
-    let pipeline = gst::parse::launch(&pipeline_str)
-        .context("Failed to create GStreamer pipeline")?
-        .dynamic_cast::<gst::Pipeline>()
-        .map_err(|_| anyhow::anyhow!("Pipeline is not a gst::Pipeline"))?;
-
-    // Get the appsink element
-    let app_sink = pipeline
-        .by_name("sink")
-        .context("Failed to get appsink from pipeline")?
+    // Cast appsink to AppSink type
+    let app_sink = appsink
         .dynamic_cast::<gst_app::AppSink>()
         .map_err(|_| anyhow::anyhow!("sink is not an AppSink"))?;
 
@@ -85,13 +200,18 @@ pub fn configure_app_sink(app_sink: &gst_app::AppSink) {
 
 /// Setup frame callback for AppSink
 ///
-/// Callback receives frames from GStreamer and stores them for rendering
+/// Callback receives frames from GStreamer and stores them for rendering.
+/// Uses lock-free ArcSwap + generation counter instead of Mutex + AtomicBool
+/// to eliminate contention between the GStreamer thread and the render thread.
+///
+/// Drop detection is handled on the reader side: the render thread compares
+/// the current generation against its last-seen generation to count skipped frames.
 pub fn setup_frame_callback(
     app_sink: &gst_app::AppSink,
-    current_frame: Arc<Mutex<Option<Vec<u8>>>>,
-    new_frame_flag: Arc<std::sync::atomic::AtomicBool>,
-    frames_dropped: Arc<AtomicU64>,
-    #[cfg(feature = "profiling")] gstreamer_frame_time: Arc<Mutex<Option<Instant>>>,
+    current_frame: Arc<ArcSwap<Vec<u8>>>,
+    frame_generation: Arc<AtomicU64>,
+    _frames_dropped: Arc<AtomicU64>,
+    #[cfg(feature = "profiling")] gstreamer_frame_time: Arc<std::sync::Mutex<Option<Instant>>>,
 ) {
     app_sink.set_callbacks(
         gst_app::AppSinkCallbacks::builder()
@@ -106,28 +226,18 @@ pub fn setup_frame_callback(
                 let map = buffer.map_readable().map_err(|_| gst::FlowError::Error)?;
                 let data = map.as_slice();
 
-                // Convert BGRA to ARGB8888 (just copy on little-endian)
+                // Copy frame data (GStreamer buffer cannot be retained past this scope)
                 let argb_data = data.to_vec();
 
-                // Store the frame
-                if let Ok(mut frame) = current_frame.lock() {
-                    // Check if we're dropping a frame (previous frame not consumed yet)
-                    if new_frame_flag.load(std::sync::atomic::Ordering::Relaxed) {
-                        frames_dropped.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        log::trace!("Video frame dropped (previous frame not consumed in time)");
-                    }
+                // Store frame lock-free and bump generation counter
+                current_frame.store(Arc::new(argb_data));
+                frame_generation.fetch_add(1, Ordering::Release);
 
-                    *frame = Some(argb_data);
-
-                    // Set flag to indicate new frame is available
-                    new_frame_flag.store(true, std::sync::atomic::Ordering::Release);
-
-                    // Record when GStreamer delivered this frame
-                    #[cfg(feature = "profiling")]
-                    {
-                        if let Ok(mut timestamp) = gstreamer_frame_time.lock() {
-                            *timestamp = Some(frame_arrival);
-                        }
+                // Record when GStreamer delivered this frame
+                #[cfg(feature = "profiling")]
+                {
+                    if let Ok(mut timestamp) = gstreamer_frame_time.lock() {
+                        *timestamp = Some(frame_arrival);
                     }
                 }
 

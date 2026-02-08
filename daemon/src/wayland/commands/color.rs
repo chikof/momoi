@@ -49,6 +49,13 @@ pub(in crate::wayland) fn set_color_wallpaper(
             continue;
         }
 
+        // Clear video/shader state when switching to solid color
+        #[cfg(feature = "video")]
+        {
+            output_data.video_path = None;
+        }
+        output_data.shader_manager = None;
+
         // Create buffer and fill with color
         let mut buffer = crate::buffer::ShmBuffer::new(app_data.shm.wl_shm(), width, height, qh)?;
 
@@ -64,10 +71,14 @@ pub(in crate::wayland) fn set_color_wallpaper(
                 .wl_surface()
                 .damage_buffer(0, 0, width as i32, height as i32);
 
+            // Request next frame callback before commit
+            // frame() must come BEFORE commit() per Wayland protocol
+            let wl_surface = layer_surface.wl_surface();
+            wl_surface.frame(qh, wl_surface.clone());
+            output_data.frame_ready = false;
+
             layer_surface.wl_surface().commit();
         }
-
-        // Mark buffer as busy (compositor is using it)
         // Just replace buffer directly
         // Swap buffer (moves old buffer to pool)
         output_data.buffer = Some(buffer);

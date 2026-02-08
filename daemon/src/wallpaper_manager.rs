@@ -302,16 +302,15 @@ impl WallpaperManager {
 
     /// Convert RGBA image to ARGB8888 format for Wayland
     pub fn rgba_to_argb8888(&self, rgba: &ImageBuffer<Rgba<u8>, Vec<u8>>) -> Vec<u8> {
-        let mut argb = Vec::with_capacity(rgba.len());
+        let raw = rgba.as_raw();
+        let mut argb = vec![0u8; raw.len()];
 
-        for pixel in rgba.pixels() {
-            let r = pixel[0];
-            let g = pixel[1];
-            let b = pixel[2];
-            let a = pixel[3];
-
-            // Wayland expects ARGB8888 in native byte order
-            argb.extend_from_slice(&[b, g, r, a]);
+        // Wayland expects ARGB8888 in native byte order (BGRA in little-endian memory)
+        for (src, dst) in raw.chunks_exact(4).zip(argb.chunks_exact_mut(4)) {
+            dst[0] = src[2]; // B
+            dst[1] = src[1]; // G
+            dst[2] = src[0]; // R
+            dst[3] = src[3]; // A
         }
 
         argb

@@ -10,7 +10,10 @@ pub struct PipelineConfig {
 impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
-            texture_format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            // Use BGRA format to match Wayland's native ARGB (BGRA in memory on
+            // little-endian). This eliminates CPU RGBA→ARGB swizzle on readback —
+            // GPU output is directly usable by Wayland without per-pixel conversion.
+            texture_format: wgpu::TextureFormat::Bgra8UnormSrgb,
             topology: wgpu::PrimitiveTopology::TriangleList,
             cull_mode: None,
         }

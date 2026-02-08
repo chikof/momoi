@@ -157,6 +157,13 @@ fn run_wayland_blocking(
         app_data.outputs.iter().filter(|o| o.configured).count()
     );
 
+    // Flush outgoing requests (frame callbacks from configure) and do another
+    // roundtrip so the compositor processes our initial commits and sends back
+    // frame-done events.  Without this, frame_ready stays false and transitions
+    // / video / shaders never render.
+    event_queue.flush()?;
+    event_queue.roundtrip(&mut app_data)?;
+
     // Populate shared state with output information
     super::outputs::sync_outputs_to_shared_state(&mut app_data);
 
@@ -169,7 +176,34 @@ fn run_wayland_blocking(
 
     // Event loop with command processing
     loop {
-        // Process pending Wayland events (non-blocking dispatch)
+        let loop_start = std::time::Instant::now();
+
+        // Read new events from the Wayland socket (non-blocking).
+        // prepare_read() + guard.read() is the non-blocking pattern:
+        // it reads any pending data from the compositor without waiting.
+        // Without this, compositor events (frame callbacks, buffer releases)
+        // would never be received after the initial roundtrips.
+        if let Some(guard) = conn.prepare_read() {
+            if let Err(e) = guard.read() {
+                // WouldBlock / EAGAIN (os error 11) means no data available
+                // right now -- that's expected in non-blocking mode.
+                let error_msg = format!("{}", e);
+                if error_msg.contains("os error 11")
+                    || error_msg.contains("would block")
+                    || error_msg.contains("Resource temporarily unavailable")
+                {
+                    // No data available, continue to process pending events
+                } else if super::reconnection::is_broken_pipe_error(&error_msg) {
+                    log::warn!("Wayland compositor disconnected (broken pipe).");
+                    return Err(anyhow::anyhow!("Broken pipe"));
+                } else {
+                    log::error!("Failed to read Wayland events: {}", e);
+                    return Err(e.into());
+                }
+            }
+        }
+
+        // Process any events now in the queue (from the read above or prior reads)
         if let Err(e) = event_queue.dispatch_pending(&mut app_data) {
             // Check if it's a broken pipe (compositor disconnected)
             let error_msg = format!("{}", e);
@@ -254,10 +288,14 @@ fn run_wayland_blocking(
             output.cleanup_buffer_pool();
         }
 
-        // Adaptive sleep: sleep based on next expected frame time
-        // Check GIF and video managers for their next frame times
+        // Adaptive sleep: sleep for remaining time after subtracting work done this frame.
+        // This prevents systematic over-sleeping that causes FPS drops.
         let next_frame_delay = super::event_loop::get_next_frame_delay(&app_data);
-        std::thread::sleep(next_frame_delay);
+        let elapsed = loop_start.elapsed();
+        if let Some(remaining) = next_frame_delay.checked_sub(elapsed) {
+            std::thread::sleep(remaining);
+        }
+        // If elapsed >= next_frame_delay, skip sleeping entirely (we're already behind)
     }
 
     log::info!(

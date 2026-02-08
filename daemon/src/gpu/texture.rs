@@ -210,6 +210,9 @@ impl GpuTexture {
     }
 
     /// Create an empty render target texture
+    ///
+    /// Uses BGRA format to match Wayland's native ARGB byte layout (BGRA in
+    /// little-endian memory), eliminating the CPU RGBA→ARGB swizzle on readback.
     pub fn create_render_target(
         device: &wgpu::Device,
         bind_group_layout: &wgpu::BindGroupLayout,
@@ -227,7 +230,7 @@ impl GpuTexture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: wgpu::TextureFormat::Bgra8UnormSrgb,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::COPY_SRC,
@@ -261,6 +264,10 @@ impl GpuTexture {
     }
 
     /// Read texture data back to CPU as ARGB8 (Wayland format)
+    ///
+    /// Since render targets use BGRA format (matching Wayland's ARGB byte layout
+    /// on little-endian), readback is a simple row copy with padding removal —
+    /// no per-pixel swizzle needed.
     pub fn read_to_argb(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<Vec<u8>> {
         // Calculate aligned bytes per row (must be multiple of 256)
         let unpadded_bytes_per_row = self.width * 4;
@@ -319,22 +326,16 @@ impl GpuTexture {
 
         let data = buffer_slice.get_mapped_range();
 
-        // Convert RGBA -> ARGB and remove padding
+        // BGRA render target output matches Wayland ARGB byte layout directly.
+        // Just strip row padding (no per-pixel swizzle needed).
+        let unpadded_row_bytes = (self.width * 4) as usize;
         let mut argb_data = vec![0u8; (self.width * self.height * 4) as usize];
 
         for row in 0..self.height {
             let src_offset = (row * padded_bytes_per_row) as usize;
-            let dst_offset = (row * self.width * 4) as usize;
-
-            for col in 0..self.width {
-                let src_pixel = src_offset + (col * 4) as usize;
-                let dst_pixel = dst_offset + (col * 4) as usize;
-
-                argb_data[dst_pixel + 0] = data[src_pixel + 2]; // B
-                argb_data[dst_pixel + 1] = data[src_pixel + 1]; // G
-                argb_data[dst_pixel + 2] = data[src_pixel + 0]; // R
-                argb_data[dst_pixel + 3] = data[src_pixel + 3]; // A
-            }
+            let dst_offset = (row as usize) * unpadded_row_bytes;
+            argb_data[dst_offset..dst_offset + unpadded_row_bytes]
+                .copy_from_slice(&data[src_offset..src_offset + unpadded_row_bytes]);
         }
 
         drop(data);

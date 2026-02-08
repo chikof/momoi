@@ -146,6 +146,7 @@ pub(super) fn create_layer_surface(
         height: 0,
         scale: 1.0,
         configured: false,
+        frame_ready: true,
         #[allow(deprecated)]
         video_manager: None,
         #[cfg(feature = "video")]
