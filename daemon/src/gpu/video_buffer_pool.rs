@@ -76,10 +76,9 @@ impl VideoBufferPool {
                 BufferState::Mapping(_) => "Mapping",
                 BufferState::Mapped => "Mapped (NOT UNMAPPED!)",
             };
-            log::error!(
+            error!(
                 "Buffer {} not ready for readback (state: {}), skipping frame. This indicates a buffer leak!",
-                buffer_idx,
-                state_name
+                buffer_idx, state_name
             );
             // Check other buffer state too
             let other_idx = (buffer_idx + 1) % 2;
@@ -89,7 +88,7 @@ impl VideoBufferPool {
                 BufferState::Mapping(_) => "Mapping",
                 BufferState::Mapped => "Mapped (NOT UNMAPPED!)",
             };
-            log::error!("Buffer {} state: {}", other_idx, other_state_name);
+            error!("Buffer {} state: {}", other_idx, other_state_name);
             return;
         }
 
@@ -119,7 +118,7 @@ impl VideoBufferPool {
 
         // Mark as copying
         *state = BufferState::Copying;
-        log::trace!("Started GPU copy to buffer {}", buffer_idx);
+        trace!("Started GPU copy to buffer {}", buffer_idx);
 
         // Swap to next buffer for next frame (double buffering: 0→1→0)
         self.current_buffer_idx = (self.current_buffer_idx + 1) % 2;
@@ -184,7 +183,7 @@ impl VideoBufferPool {
 
         // Update state to Mapping
         *state = BufferState::Mapping(rx);
-        log::trace!("Started buffer mapping for buffer {}", buffer_idx);
+        trace!("Started buffer mapping for buffer {}", buffer_idx);
 
         // Try again immediately (might complete instantly after the poll)
         self.try_read_frame_from_mapping(buffer_idx)
@@ -205,7 +204,7 @@ impl VideoBufferPool {
             Ok(Ok(())) => {
                 // Mapping complete!
                 *state = BufferState::Mapped;
-                log::trace!("Buffer {} mapping complete", buffer_idx);
+                trace!("Buffer {} mapping complete", buffer_idx);
                 self.read_mapped_frame(buffer_idx)
             }
             Ok(Err(e)) => {
@@ -248,7 +247,7 @@ impl VideoBufferPool {
         // This prevents buffers from getting stuck in Mapped state
         buffer.unmap();
         *state = BufferState::Free;
-        log::trace!("Read and unmapped buffer {}", buffer_idx);
+        trace!("Read and unmapped buffer {}", buffer_idx);
 
         Ok(Some(argb_data))
     }

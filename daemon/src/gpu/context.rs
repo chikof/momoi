@@ -16,7 +16,7 @@ impl GpuContext {
     /// This initializes wgpu with the best available adapter (GPU).
     /// On Linux, this will typically use Vulkan.
     pub async fn new() -> Result<Self> {
-        log::info!("Initializing GPU context...");
+        info!("Initializing GPU context...");
 
         // Create wgpu instance
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -35,10 +35,9 @@ impl GpuContext {
             .context("Failed to find suitable GPU adapter")?;
 
         let adapter_info = adapter.get_info();
-        log::info!(
+        info!(
             "Selected GPU adapter: {} ({:?})",
-            adapter_info.name,
-            adapter_info.backend
+            adapter_info.name, adapter_info.backend
         );
 
         // Request device and queue
@@ -56,12 +55,11 @@ impl GpuContext {
 
         let limits = device.limits();
 
-        log::info!("GPU context initialized successfully");
-        log::info!("  Backend: {:?}", adapter_info.backend);
-        log::info!(
+        info!("GPU context initialized successfully");
+        info!("  Backend: {:?}", adapter_info.backend);
+        info!(
             "  Max Texture Size: {}x{}",
-            limits.max_texture_dimension_2d,
-            limits.max_texture_dimension_2d
+            limits.max_texture_dimension_2d, limits.max_texture_dimension_2d
         );
 
         Ok(Self {

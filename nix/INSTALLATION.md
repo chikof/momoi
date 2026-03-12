@@ -337,5 +337,5 @@ Common issues:
 
 ## Next Steps
 
-- [View full configuration options](./NIXOS_CONFIGURATION.md)
-- [Read the README](./README.md)
+- [View full configuration options](../CONFIGURATION.md)
+- [Read the README](../README.md)

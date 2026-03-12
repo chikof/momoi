@@ -162,7 +162,7 @@ impl ShaderManager {
                     let start = std::time::Instant::now();
                     match gpu.render_shader(name, width, height, elapsed, &self.params) {
                         Ok(Some(data)) => {
-                            log::info!(
+                            info!(
                                 "GPU shader '{}' rendered {}x{} in {:.2}ms",
                                 name,
                                 width,
@@ -173,11 +173,11 @@ impl ShaderManager {
                         }
                         Ok(None) => {
                             // Async readback warming up (first frame), no data yet
-                            log::trace!("GPU shader '{}' async warmup (no frame yet)", name);
+                            trace!("GPU shader '{}' async warmup (no frame yet)", name);
                             return Ok(None);
                         }
                         Err(e) => {
-                            log::warn!("GPU shader rendering failed: {}, falling back to CPU", e);
+                            warn!("GPU shader rendering failed: {}, falling back to CPU", e);
                         }
                     }
                 }
@@ -195,7 +195,7 @@ impl ShaderManager {
             BuiltinShader::Raymarching => self.render_fallback(width, height, "Raymarching"),
             BuiltinShader::Tunnel => self.render_fallback(width, height, "Tunnel"),
         };
-        log::info!(
+        info!(
             "CPU shader '{:?}' rendered {}x{} in {:.2}ms",
             self.shader,
             width,
@@ -223,7 +223,7 @@ impl ShaderManager {
             }
         }
 
-        log::warn!(
+        warn!(
             "{} shader requires GPU acceleration, showing simple fallback",
             name
         );
@@ -368,8 +368,8 @@ impl ShaderManager {
         for i in 0..star_count {
             // Pseudo-random position based on index
             let seed = i as f32 * 12.9898;
-            let px = (seed.sin() * 43758.5453).fract();
-            let py = ((seed + 1.0).sin() * 43758.5453).fract();
+            let px = (seed.sin() * 43_758.547).fract();
+            let py = ((seed + 1.0).sin() * 43_758.547).fract();
 
             // Animate star position (moving towards viewer)
             let z = ((time * 0.5 + seed) % 2.0) - 1.0;
@@ -385,7 +385,7 @@ impl ShaderManager {
                 let idx = ((y as u32 * width + x as u32) * 4) as usize;
                 if idx + 3 < buffer.len() {
                     let brightness = ((1.0 - z) * 255.0) as u8;
-                    buffer[idx] = brightness; // B
+                    buffer[idx] = brightness; //     B
                     buffer[idx + 1] = brightness; // G
                     buffer[idx + 2] = brightness; // R
                     buffer[idx + 3] = 255;
@@ -410,7 +410,7 @@ impl ShaderManager {
             self.start_time = Instant::now();
             self.context.time = 0.0;
             self.context.frame = 0;
-            log::info!("Switched to shader: {}", shader.name());
+            info!("Switched to shader: {}", shader.name());
         }
     }
 }

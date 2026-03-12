@@ -19,7 +19,7 @@ pub async fn start(
     }
 
     let listener = UnixListener::bind(&socket_path)?;
-    log::info!("IPC server listening on: {}", socket_path.display());
+    info!("IPC server listening on: {}", socket_path.display());
 
     loop {
         // Check if we should exit
@@ -37,12 +37,12 @@ pub async fn start(
                 let tx = wallpaper_tx.clone();
                 tokio::spawn(async move {
                     if let Err(e) = handle_client(stream, state, tx).await {
-                        log::error!("Error handling client: {}", e);
+                        error!("Error handling client: {}", e);
                     }
                 });
             }
             Ok(Err(e)) => {
-                log::error!("Error accepting connection: {}", e);
+                error!("Error accepting connection: {}", e);
             }
             Err(_) => {
                 // Timeout, continue loop to check exit condition
@@ -53,7 +53,7 @@ pub async fn start(
 
     // Clean up socket
     let _ = std::fs::remove_file(&socket_path);
-    log::info!("IPC server stopped");
+    info!("IPC server stopped");
     Ok(())
 }
 
@@ -70,7 +70,7 @@ async fn handle_client(
         let response = match serde_json::from_str::<Command>(&line) {
             Ok(command) => handle_command(command, &state, &wallpaper_tx).await,
             Err(e) => {
-                log::warn!("Invalid command: {}", e);
+                warn!("Invalid command: {}", e);
                 Response::Error(WallpaperError::Ipc(format!("Invalid command: {}", e)))
             }
         };
@@ -92,7 +92,7 @@ async fn handle_command(
     state: &Arc<Mutex<DaemonState>>,
     wallpaper_tx: &mpsc::UnboundedSender<WallpaperCommand>,
 ) -> Response {
-    log::debug!("Handling command: {:?}", command);
+    debug!("Handling command: {:?}", command);
 
     match command {
         Command::Ping => Response::Pong,
@@ -125,12 +125,9 @@ async fn handle_command(
             transition,
             scale,
         } => {
-            log::info!(
+            info!(
                 "Setting wallpaper: {} on output: {:?} with scale: {:?}, transition: {:?}",
-                path,
-                output,
-                scale,
-                transition
+                path, output, scale, transition
             );
 
             // Validate file exists
@@ -159,7 +156,7 @@ async fn handle_command(
         }
 
         Command::SetColor { color, output } => {
-            log::info!("Setting color: {} on output: {:?}", color, output);
+            info!("Setting color: {} on output: {:?}", color, output);
 
             // Validate color format
             if !is_valid_hex_color(&color) {
@@ -187,7 +184,7 @@ async fn handle_command(
             transition,
             params,
         } => {
-            log::info!("Setting shader: {} on output: {:?}", shader, output);
+            info!("Setting shader: {} on output: {:?}", shader, output);
 
             // Send command to Wayland manager
             let cmd = WallpaperCommand::SetShader {
@@ -211,7 +208,7 @@ async fn handle_command(
             params,
             output,
         } => {
-            log::info!("Setting overlay: {} on output: {:?}", overlay, output);
+            info!("Setting overlay: {} on output: {:?}", overlay, output);
 
             // Convert common::OverlayParams to internal overlay_shader::OverlayParams
             let internal_params = if let Some(p) = params {
@@ -241,7 +238,7 @@ async fn handle_command(
         }
 
         Command::ClearOverlay { output } => {
-            log::info!("Clearing overlay for output: {:?}", output);
+            info!("Clearing overlay for output: {:?}", output);
             let cmd = WallpaperCommand::ClearOverlay { output };
             if let Err(e) = wallpaper_tx.send(cmd) {
                 return Response::Error(WallpaperError::Ipc(format!(
@@ -253,7 +250,7 @@ async fn handle_command(
         }
 
         Command::Kill => {
-            log::info!("Received kill command");
+            info!("Received kill command");
             // Set exit flag
             tokio::spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -282,7 +279,7 @@ async fn handle_command(
             // Now work with playlist
             if let Some(ref mut playlist) = state.playlist {
                 if let Some(next) = playlist.next() {
-                    log::info!("Moving to next wallpaper: {:?}", next);
+                    info!("Moving to next wallpaper: {:?}", next);
                     let next_path = next.to_path_buf();
 
                     // Drop the state lock before sending command
@@ -337,7 +334,7 @@ async fn handle_command(
             // Now work with playlist
             if let Some(ref mut playlist) = state.playlist {
                 if let Some(prev) = playlist.prev() {
-                    log::info!("Moving to previous wallpaper: {:?}", prev);
+                    info!("Moving to previous wallpaper: {:?}", prev);
                     let prev_path = prev.to_path_buf();
 
                     // Drop the state lock before sending command
@@ -376,7 +373,7 @@ async fn handle_command(
             let mut state = state.lock().await;
             if let Some(ref mut playlist) = state.playlist {
                 playlist.toggle_shuffle();
-                log::info!("Toggled shuffle mode");
+                info!("Toggled shuffle mode");
                 Response::Ok
             } else {
                 Response::Error(WallpaperError::Ipc("No playlist configured".to_string()))

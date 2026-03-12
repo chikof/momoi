@@ -17,10 +17,7 @@
 #
 # Then in home.nix:
 # services.momoi.enable = true;
-
-{ inputs, ... }:
-
-{
+{inputs, ...}: {
   imports = [
     # Import the main momoi module
     (import ./home-manager.nix)

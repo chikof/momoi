@@ -50,6 +50,7 @@ impl<'a> PipelineBuilder<'a> {
         self
     }
 
+    #[allow(dead_code)]
     pub fn with_config(mut self, config: PipelineConfig) -> Self {
         #[allow(dead_code)] // Builder method for custom pipeline config
         {

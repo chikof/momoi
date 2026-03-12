@@ -4,20 +4,15 @@ use std::time::{Duration, Instant};
 use sysinfo::{ProcessesToUpdate, System};
 
 /// Performance mode for resource management
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PerformanceMode {
     /// No restrictions, full quality
     Performance,
     /// Moderate throttling, good balance (default)
+    #[default]
     Balanced,
     /// Aggressive optimization for battery life
     PowerSave,
-}
-
-impl Default for PerformanceMode {
-    fn default() -> Self {
-        PerformanceMode::Balanced
-    }
 }
 
 impl PerformanceMode {
@@ -142,7 +137,7 @@ impl ResourceMonitor {
     #[allow(dead_code)] // Part of public API for manual mode control
     pub fn set_mode(&mut self, mode: PerformanceMode) {
         if self.mode != mode {
-            log::info!("Performance mode changed: {:?} -> {:?}", self.mode, mode);
+            info!("Performance mode changed: {:?} -> {:?}", self.mode, mode);
             self.mode = mode;
         }
     }
@@ -190,7 +185,7 @@ impl ResourceMonitor {
             };
 
             if new_mode != self.mode {
-                log::info!(
+                info!(
                     "Auto-switching performance mode: {:?} -> {:?} (battery: {}%, on_battery: {})",
                     self.mode,
                     new_mode,
@@ -208,7 +203,7 @@ impl ResourceMonitor {
             battery_percent,
         };
 
-        log::debug!(
+        debug!(
             "Resource stats: mem={}MB cpu={:.1}% battery={}%{}",
             memory_bytes / 1024 / 1024,
             cpu_percent,

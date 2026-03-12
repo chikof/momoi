@@ -112,9 +112,9 @@ pub fn render_image_argb(
     for i in 0..(image_data.len() / 4) {
         let offset = i * 4;
 
-        rgba_data[offset + 0] = image_data[offset + 2]; // R
+        rgba_data[offset] = image_data[offset + 2]; //     R
         rgba_data[offset + 1] = image_data[offset + 1]; // G
-        rgba_data[offset + 2] = image_data[offset + 0]; // B
+        rgba_data[offset + 2] = image_data[offset]; //     B
         rgba_data[offset + 3] = image_data[offset + 3]; // A
     }
 

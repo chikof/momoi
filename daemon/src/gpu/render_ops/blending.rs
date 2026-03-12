@@ -201,7 +201,7 @@ pub fn blend_frames_cached(
     let key = (width, height);
 
     let resources = resources_map.entry(key).or_insert_with(|| {
-        log::info!(
+        info!(
             "Creating cached blend resources for {}x{} (2 source textures + render target + async staging pool)",
             width,
             height

@@ -665,5 +665,4 @@ wwctl set image.jpg --output all
 
 - [README.md](README.md) - Main documentation
 - [TRANSITIONS.md](TRANSITIONS.md) - Transition effects guide
-- [ROADMAP.md](ROADMAP.md) - Development roadmap
 - [config.toml.example](config.toml.example) - Full example configuration

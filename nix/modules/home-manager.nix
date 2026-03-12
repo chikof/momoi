@@ -1,6 +1,5 @@
 # Home Manager module for Momoi wallpaper daemon
 # Can optionally receive `momoiFlake` via extraSpecialArgs, or use the package option directly
-
 {
   config,
   lib,
@@ -8,22 +7,19 @@
   momoiFlake ? null,
   ...
 }:
-
-with lib;
-
-let
+with lib; let
   cfg = config.services.momoi;
 
   # Import shared options
-  sharedOptions = import ./options.nix { inherit lib pkgs; };
+  sharedOptions = import ./options.nix {inherit lib pkgs;};
 
   # Build config file
-  configFile = import ./config-builder.nix { inherit lib pkgs; } cfg;
+  configFile = import ./config-builder.nix {inherit lib pkgs;} cfg;
 
   # Get default package from momoiFlake if available
   defaultPackage =
-    if momoiFlake != null then
-      momoiFlake.packages.${pkgs.system}.default
+    if momoiFlake != null
+    then momoiFlake.packages.${pkgs.system}.default
         or (throw "Momoi package not available for system ${pkgs.system}")
     else
       throw ''
@@ -35,10 +31,8 @@ let
         2. Set the package explicitly:
            services.momoi.package = inputs.momoi.packages.''${pkgs.system}.default;
       '';
-in
-
-{
-  imports = [ sharedOptions ];
+in {
+  imports = [sharedOptions];
 
   config = mkIf cfg.enable {
     # Set the package default if not explicitly set
@@ -48,14 +42,14 @@ in
     home.file.".config/momoi/config.toml".source = configFile;
 
     # Install package
-    home.packages = [ cfg.package ];
+    home.packages = [cfg.package];
 
     # Start service with Home Manager
     systemd.user.services.momoi = {
       Unit = {
         Description = "Momoi Wallpaper Daemon";
-        PartOf = [ "graphical-session.target" ];
-        After = [ "graphical-session.target" ];
+        PartOf = ["graphical-session.target"];
+        After = ["graphical-session.target"];
       };
 
       Service = {
@@ -65,7 +59,7 @@ in
       };
 
       Install = {
-        WantedBy = [ "graphical-session.target" ];
+        WantedBy = ["graphical-session.target"];
       };
     };
   };

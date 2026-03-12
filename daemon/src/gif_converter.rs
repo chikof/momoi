@@ -78,11 +78,11 @@ pub fn convert_gif_to_webm(gif_path: impl AsRef<Path>) -> Result<PathBuf> {
 
     // Check if already converted
     if webm_path.exists() {
-        log::info!("Using cached WebM conversion: {}", webm_path.display());
+        info!("Using cached WebM conversion: {}", webm_path.display());
         return Ok(webm_path);
     }
 
-    log::info!(
+    info!(
         "Converting GIF to WebM: {} -> {}",
         gif_path.display(),
         webm_path.display()
@@ -122,7 +122,7 @@ pub fn convert_gif_to_webm(gif_path: impl AsRef<Path>) -> Result<PathBuf> {
         anyhow::bail!("FFmpeg conversion failed: {}", stderr);
     }
 
-    log::info!(
+    info!(
         "Successfully converted GIF to WebM: {}",
         webm_path.display()
     );
@@ -197,22 +197,19 @@ pub fn cleanup_cache(max_age: u64) -> Result<()> {
             continue;
         }
 
-        if let Ok(metadata) = entry.metadata() {
-            if let Ok(modified) = metadata.modified() {
-                if let Ok(age) = now.duration_since(modified) {
-                    if age.as_secs() > max_age {
-                        if std::fs::remove_file(&path).is_ok() {
-                            removed_count += 1;
-                            log::debug!("Removed old cached WebM: {}", path.display());
-                        }
-                    }
-                }
-            }
+        if let Ok(metadata) = entry.metadata()
+            && let Ok(modified) = metadata.modified()
+            && let Ok(age) = now.duration_since(modified)
+            && age.as_secs() > max_age
+            && std::fs::remove_file(&path).is_ok()
+        {
+            removed_count += 1;
+            debug!("Removed old cached WebM: {}", path.display());
         }
     }
 
     if removed_count > 0 {
-        log::info!("Cleaned up {} old cached WebM files", removed_count);
+        info!("Cleaned up {} old cached WebM files", removed_count);
     }
 
     Ok(())

@@ -241,11 +241,11 @@ speed = 0.5
 color1 = "1a1a2e"
 ```
 
-See [NIXOS_CONFIGURATION.md](./NIXOS_CONFIGURATION.md) for complete NixOS guide, or [CONFIGURATION.md](./CONFIGURATION.md) for TOML reference.
+See [NIXOS_CONFIGURATION.md](./nix/README.md) for complete NixOS guide, or [CONFIGURATION.md](./CONFIGURATION.md) for TOML reference.
 
 ## 📖 Documentation
 
-- [NIXOS_CONFIGURATION.md](./NIXOS_CONFIGURATION.md) - NixOS declarative configuration guide
+- [NIXOS_CONFIGURATION.md](./nix/README.md) - NixOS declarative configuration guide
 - [CONFIGURATION.md](./CONFIGURATION.md) - TOML configuration reference
 - [CONTRIBUTING.md](./CONTRIBUTING.md) - Contribution guidelines
 

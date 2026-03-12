@@ -50,15 +50,14 @@ pub struct GpuCapabilities {
 
 impl GpuCapabilities {
     pub fn log_info(&self) {
-        log::info!("GPU Capabilities:");
-        log::info!("  Adapter: {}", self.adapter_name);
-        log::info!("  Backend: {}", self.backend);
-        log::info!(
+        info!("GPU Capabilities:");
+        info!("  Adapter: {}", self.adapter_name);
+        info!("  Backend: {}", self.backend);
+        info!(
             "  Max Texture Size: {}x{}",
-            self.max_texture_size,
-            self.max_texture_size
+            self.max_texture_size, self.max_texture_size
         );
-        log::info!(
+        info!(
             "  Compute Shaders: {}",
             if self.supports_compute { "Yes" } else { "No" }
         );

@@ -608,6 +608,6 @@ Add to your Home Manager flake:
 
 ## See Also
 
-- [CONFIGURATION.md](./CONFIGURATION.md) - TOML configuration reference
-- [README.md](./README.md) - Main documentation
-- [CONTRIBUTING.md](./CONTRIBUTING.md) - Contributing guide
+- [CONFIGURATION.md](../CONFIGURATION.md) - TOML configuration reference
+- [README.md](../README.md) - Main documentation
+- [CONTRIBUTING.md](../CONTRIBUTING.md) - Contributing guide

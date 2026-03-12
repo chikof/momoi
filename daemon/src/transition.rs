@@ -1,12 +1,13 @@
 use std::time::{Duration, Instant};
 
 /// Transition effect types
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 #[allow(dead_code)] // All variants used via conversion from common::TransitionType
 pub enum TransitionType {
     /// No transition, instant switch
     None,
     /// Fade in/out (alpha blending)
+    #[default]
     Fade,
     /// Wipe from left to right
     WipeLeft,
@@ -24,12 +25,6 @@ pub enum TransitionType {
     Outer,
     /// Random selection (will be converted to a specific type)
     Random,
-}
-
-impl Default for TransitionType {
-    fn default() -> Self {
-        Self::Fade
-    }
 }
 
 impl From<&common::TransitionType> for TransitionType {
@@ -69,7 +64,7 @@ impl From<&common::TransitionType> for TransitionType {
 }
 
 /// Easing functions for smooth transitions
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[allow(dead_code)] // All variants part of public easing API
 pub enum EasingFunction {
     /// Linear interpolation (constant speed)
@@ -79,13 +74,8 @@ pub enum EasingFunction {
     /// Ease out (fast start, slow end)
     EaseOut,
     /// Ease in-out (slow start and end, fast middle)
+    #[default]
     EaseInOut,
-}
-
-impl Default for EasingFunction {
-    fn default() -> Self {
-        Self::EaseInOut
-    }
 }
 
 impl EasingFunction {
@@ -205,7 +195,7 @@ impl Transition {
                     Ok(Some(blended)) => return Some(blended),
                     Ok(None) => return None, // GPU warming up, no frame yet
                     Err(e) => {
-                        log::warn!("GPU transition blending failed: {}, falling back to CPU", e);
+                        warn!("GPU transition blending failed: {}, falling back to CPU", e);
                     }
                 }
             }

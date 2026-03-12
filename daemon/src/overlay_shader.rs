@@ -4,6 +4,7 @@ use std::time::Instant;
 
 /// Overlay shader types that render on top of existing wallpapers
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum OverlayShader {
     /// Darkens edges (vignette effect)
     Vignette { strength: f32 },
@@ -77,7 +78,7 @@ impl OverlayShader {
 
     /// Convert to common::OverlayEffect for GPU rendering
     #[allow(dead_code)] // Used for GPU overlay feature integration
-    pub fn to_common_effect(&self) -> common::OverlayEffect {
+    pub fn to_common_effect(self) -> common::OverlayEffect {
         match self {
             OverlayShader::Vignette { .. } => common::OverlayEffect::Vignette,
             OverlayShader::Scanlines { .. } => common::OverlayEffect::Scanlines,
@@ -91,45 +92,45 @@ impl OverlayShader {
 
     /// Convert to common::OverlayParams for GPU rendering
     #[allow(dead_code)] // Used for GPU overlay feature integration
-    pub fn to_common_params(&self) -> common::OverlayParams {
+    pub fn to_common_params(self) -> common::OverlayParams {
         match self {
             OverlayShader::Vignette { strength } => common::OverlayParams {
-                strength: Some(*strength),
+                strength: Some(strength),
                 ..Default::default()
             },
             OverlayShader::Scanlines {
                 intensity,
                 line_width,
             } => common::OverlayParams {
-                intensity: Some(*intensity),
-                line_width: Some(*line_width),
+                intensity: Some(intensity),
+                line_width: Some(line_width),
                 ..Default::default()
             },
             OverlayShader::FilmGrain { intensity } => common::OverlayParams {
-                intensity: Some(*intensity),
+                intensity: Some(intensity),
                 ..Default::default()
             },
             OverlayShader::ChromaticAberration { offset } => common::OverlayParams {
-                offset: Some(*offset),
+                offset: Some(offset),
                 ..Default::default()
             },
             OverlayShader::CRT {
                 curvature,
                 scanline_intensity,
             } => common::OverlayParams {
-                curvature: Some(*curvature),
-                intensity: Some(*scanline_intensity),
+                curvature: Some(curvature),
+                intensity: Some(scanline_intensity),
                 ..Default::default()
             },
             OverlayShader::Pixelate { pixel_size } => common::OverlayParams {
-                pixel_size: Some(*pixel_size),
+                pixel_size: Some(pixel_size),
                 ..Default::default()
             },
             OverlayShader::ColorTint { r, g, b, strength } => common::OverlayParams {
-                r: Some(*r),
-                g: Some(*g),
-                b: Some(*b),
-                strength: Some(*strength),
+                r: Some(r),
+                g: Some(g),
+                b: Some(b),
+                strength: Some(strength),
                 ..Default::default()
             },
         }
@@ -188,7 +189,7 @@ impl OverlayManager {
 
         // Log first few frames to see parameters
         if self.frame <= 3 {
-            log::info!(
+            info!(
                 "Overlay frame #{}: {} ({}x{}, {} bytes) - time: {:.2}s",
                 self.frame,
                 self.overlay.name(),
@@ -298,7 +299,7 @@ impl OverlayManager {
                 let idx = ((y * width + x) * 4) as usize;
 
                 // Pseudo-random noise
-                let seed = (x as f32 * 12.9898 + y as f32 * 78.233 + time * 43758.5453).sin();
+                let seed = (x as f32 * 12.9898 + y as f32 * 78.233 + time * 43_758.547).sin();
                 let noise = (seed.fract() - 0.5) * intensity * 255.0;
 
                 buffer[idx] = (buffer[idx] as f32 + noise).clamp(0.0, 255.0) as u8;

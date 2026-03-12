@@ -5,7 +5,7 @@
 
 use crate::gpu::renderer::ShaderResources;
 use crate::gpu::{GpuContext, GpuTexture};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use wgpu;
 use wgpu::util::DeviceExt;
 
@@ -184,7 +184,7 @@ pub fn render_shader_cached(
     let key = (width, height);
 
     let resources = resources_map.entry(key).or_insert_with(|| {
-        log::info!(
+        info!(
             "Creating cached shader resources for {}x{} (render target + uniform buffer + async staging pool)",
             width,
             height

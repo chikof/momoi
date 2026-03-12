@@ -297,7 +297,7 @@ impl Config {
     /// Load configuration from a specific path
     pub fn load_from_path(path: &Path) -> Result<Self> {
         if !path.exists() {
-            log::info!(
+            info!(
                 "Config file not found at {}, using defaults",
                 path.display()
             );
@@ -311,7 +311,7 @@ impl Config {
             return Ok(config);
         }
 
-        log::info!("Loading configuration from {}", path.display());
+        info!("Loading configuration from {}", path.display());
 
         // Use forgeconf's ConfigFile to load from the specified path
         let config_file =

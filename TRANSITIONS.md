@@ -298,9 +298,3 @@ Planned for future releases:
 - This is expected - transitions are per-output
 - Each monitor completes its transition independently
 - To sync, use the same duration for all outputs
-
-## See Also
-
-- `README.md` - General usage and installation
-- `OPTIMIZATIONS.md` - Performance tuning and benchmarks
-- `ROADMAP.md` - Development roadmap and future features

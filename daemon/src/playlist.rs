@@ -59,7 +59,7 @@ impl PlaylistState {
             state.generate_shuffle_order();
         }
 
-        log::info!(
+        info!(
             "Created playlist with {} wallpapers (shuffle: {}, interval: {}s){}",
             state.wallpapers.len(),
             shuffle,
@@ -119,7 +119,7 @@ impl PlaylistState {
                     }
                 }
                 Err(e) => {
-                    log::warn!("Failed to glob pattern '{}': {}", source, e);
+                    warn!("Failed to glob pattern '{}': {}", source, e);
                 }
             }
         }
@@ -147,7 +147,7 @@ impl PlaylistState {
         self.shuffle_order = (0..self.wallpapers.len()).collect();
         self.shuffle_order.shuffle(&mut rng);
         self.current_index = 0;
-        log::debug!("Generated new shuffle order");
+        debug!("Generated new shuffle order");
     }
 
     /// Get the current wallpaper path
@@ -212,7 +212,7 @@ impl PlaylistState {
         if self.shuffle {
             self.generate_shuffle_order();
         }
-        log::info!(
+        info!(
             "Shuffle {}",
             if self.shuffle { "enabled" } else { "disabled" }
         );

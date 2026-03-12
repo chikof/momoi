@@ -56,12 +56,12 @@ impl WallpaperManager {
 
         // Check cache first
         if !self.cache.contains_key(&path_str) {
-            log::info!("Loading image: {}", path.display());
+            info!("Loading image: {}", path.display());
 
             let image =
                 image::open(path).context(format!("Failed to load image: {}", path.display()))?;
 
-            log::info!(
+            info!(
                 "Loaded image: {}x{} ({})",
                 image.width(),
                 image.height(),
@@ -174,34 +174,27 @@ impl WallpaperManager {
         let target_ratio = target_width as f32 / target_height as f32;
         let img_ratio = img_width as f32 / img_height as f32;
 
-        log::debug!(
+        debug!(
             "Fit mode: image {}x{} (ratio {:.2}), target {}x{} (ratio {:.2})",
-            img_width,
-            img_height,
-            img_ratio,
-            target_width,
-            target_height,
-            target_ratio
+            img_width, img_height, img_ratio, target_width, target_height, target_ratio
         );
 
         let (scale_width, scale_height) = if target_ratio > img_ratio {
             // Target is wider than image, scale to height
             let scale = target_height as f32 / img_height as f32;
             let scaled = ((img_width as f32 * scale) as u32, target_height);
-            log::debug!(
+            debug!(
                 "Target wider: scaling to height, result: {}x{}",
-                scaled.0,
-                scaled.1
+                scaled.0, scaled.1
             );
             scaled
         } else {
             // Target is taller than image (or same), scale to width
             let scale = target_width as f32 / img_width as f32;
             let scaled = (target_width, (img_height as f32 * scale) as u32);
-            log::debug!(
+            debug!(
                 "Target taller: scaling to width, result: {}x{}",
-                scaled.0,
-                scaled.1
+                scaled.0, scaled.1
             );
             scaled
         };
@@ -214,7 +207,7 @@ impl WallpaperManager {
         let x_offset = (target_width.saturating_sub(scale_width)) / 2;
         let y_offset = (target_height.saturating_sub(scale_height)) / 2;
 
-        log::debug!("Centering at offset ({}, {})", x_offset, y_offset);
+        debug!("Centering at offset ({}, {})", x_offset, y_offset);
 
         image::imageops::overlay(&mut output, &resized, x_offset as i64, y_offset as i64);
 
@@ -319,7 +312,7 @@ impl WallpaperManager {
     /// Clear the image cache
     #[allow(dead_code)] // Part of public API for cache management
     pub fn clear_cache(&mut self) {
-        log::info!("Clearing image cache ({} entries)", self.cache.len());
+        info!("Clearing image cache ({} entries)", self.cache.len());
         self.cache.clear();
     }
 

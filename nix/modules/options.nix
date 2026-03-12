@@ -1,8 +1,9 @@
-{ lib, pkgs, ... }:
-
-with lib;
-
 {
+  lib,
+  pkgs,
+  ...
+}:
+with lib; {
   options.services.momoi = {
     enable = mkEnableOption "Momoi wallpaper daemon";
 
@@ -169,7 +170,7 @@ with lib;
 
               sources = mkOption {
                 type = types.listOf types.str;
-                default = [ ];
+                default = [];
                 example = [
                   "~/Pictures/Wallpapers"
                   "~/wallpapers/*.jpg"
@@ -238,7 +239,7 @@ with lib;
             };
           }
         );
-        default = [ ];
+        default = [];
         description = "Time-based schedule entries";
       };
 
@@ -283,13 +284,13 @@ with lib;
 
               playlistSources = mkOption {
                 type = types.listOf types.str;
-                default = [ ];
+                default = [];
                 description = "Playlist sources for this output";
               };
             };
           }
         );
-        default = [ ];
+        default = [];
         description = "Per-output configuration";
       };
 
@@ -310,13 +311,13 @@ with lib;
 
               wallpapers = mkOption {
                 type = types.listOf types.str;
-                default = [ ];
+                default = [];
                 description = "List of wallpaper paths";
               };
             };
           }
         );
-        default = [ ];
+        default = [];
         description = "Named wallpaper collections";
       };
 
@@ -395,7 +396,7 @@ with lib;
             };
           }
         );
-        default = [ ];
+        default = [];
         description = "Shader presets";
       };
     };

@@ -418,8 +418,8 @@ impl GpuRenderer {
     /// # Returns
     /// * `Some(Vec<u8>)` - ARGB8 buffer for Wayland if ready
     /// * `None` - GPU not ready, reuse previous frame
-    /// Render video frame with optional GPU scaling
     ///
+    /// Render video frame with optional GPU scaling
     /// Takes BGRA data at source resolution and renders to target resolution.
     /// If source == target, uses blit pipeline (fast copy).
     /// If source != target, uses scale pipeline (GPU bilinear filtering).
@@ -734,9 +734,9 @@ impl GpuRenderer {
         for i in 0..(base_frame.len() / 4) {
             let offset = i * 4;
 
-            rgba_data[offset + 0] = base_frame[offset + 2]; // R
+            rgba_data[offset] = base_frame[offset + 2]; //     R
             rgba_data[offset + 1] = base_frame[offset + 1]; // G
-            rgba_data[offset + 2] = base_frame[offset + 0]; // B
+            rgba_data[offset + 2] = base_frame[offset]; //     B
             rgba_data[offset + 3] = base_frame[offset + 3]; // A
         }
 

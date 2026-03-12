@@ -49,11 +49,9 @@ impl SchedulerState {
             if self.time_in_range(&current_time, &entry.start_time, &entry.end_time) {
                 // Check if this is a different entry than the current one
                 if self.active_entry.as_ref() != Some(&entry.name) {
-                    log::info!(
+                    info!(
                         "Schedule activated: '{}' ({} - {})",
-                        entry.name,
-                        entry.start_time,
-                        entry.end_time
+                        entry.name, entry.start_time, entry.end_time
                     );
 
                     self.active_entry = Some(entry.name.clone());
@@ -73,7 +71,7 @@ impl SchedulerState {
 
         // No schedule entry matches, clear active entry
         if self.active_entry.is_some() {
-            log::info!("No active schedule entry");
+            info!("No active schedule entry");
             self.active_entry = None;
         }
 
@@ -85,7 +83,7 @@ impl SchedulerState {
         let start_time = match Self::parse_time(start) {
             Ok(t) => t,
             Err(e) => {
-                log::warn!("Failed to parse start time '{}': {}", start, e);
+                warn!("Failed to parse start time '{}': {}", start, e);
                 return false;
             }
         };
@@ -93,7 +91,7 @@ impl SchedulerState {
         let end_time = match Self::parse_time(end) {
             Ok(t) => t,
             Err(e) => {
-                log::warn!("Failed to parse end time '{}': {}", end, e);
+                warn!("Failed to parse end time '{}': {}", end, e);
                 return false;
             }
         };
