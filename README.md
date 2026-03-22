@@ -18,9 +18,6 @@
 
 Welcome to Momoi!
 
-First of all, if I were you, I wouldn't consider using this in the first place.
-I'd say that this is not usable at all, I mean I use it myself just because I have to test it.
-
 Momoi is an advanced Wayland wallpaper daemon with GPU-accelerated rendering, supporting images, animated GIFs (converted to WebM for efficiency), videos, procedural shaders, and post-processing effects. Built for performance and flexibility, it provides smooth transitions, multi-monitor support, and runtime control.
 
 ## ⚙️ Contributing

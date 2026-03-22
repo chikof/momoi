@@ -1,0 +1,21 @@
+[package]
+name = "config-system"
+description = "TOML-based configuration with live reload"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+render-core = { workspace = true }
+notify = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+dirs = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+
+[lints]
+workspace = true

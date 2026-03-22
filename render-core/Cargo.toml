@@ -1,0 +1,18 @@
+[package]
+name = "render-core"
+description = "Abstract rendering traits and shared types"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+glam = { workspace = true }
+bytemuck = { workspace = true }
+image = { workspace = true }
+parking_lot = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,30 @@
+[package]
+name = "audio-engine"
+description = "Audio capture and FFT analysis (PipeWire or silent fallback)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+render-core = { workspace = true }
+rustfft = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+glam = { workspace = true }
+
+# PipeWire Rust bindings — only pulled in when the feature is enabled.
+# Version 0.8.x: matches the API used in pipewire_source.rs.
+# The underlying C library (libpipewire-0.3) can be any recent version.
+[target.'cfg(unix)'.dependencies.pipewire]
+version = "0.8"
+optional = true
+
+[features]
+default = []
+pipewire-audio = ["dep:pipewire"]
+
+[lints]
+workspace = true

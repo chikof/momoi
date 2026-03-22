@@ -1,70 +1,114 @@
 [workspace]
 resolver = "2"
-members = ["client", "daemon", "common"]
-default-members = ["client", "daemon"]
+members = [
+  "daemon-core",
+  "wayland-backend",
+  "render-core",
+  "render-gpu",
+  "render-cpu",
+  "shader-engine",
+  "audio-engine",
+  "wallpaper-runtime",
+  "config-system",
+  "overlay-system",
+  "momoi-ctl",
+  "ipc-protocol",
+]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
 
 [workspace.package]
 version = "0.1.0"
-authors = ["Chiko chiko@envs.net"]
 edition = "2024"
+authors = ["chikof"]
 license = "MIT"
-rust-version = "1.92.0"
+rust-version = "1.92"
 
 [workspace.dependencies]
-common = { path = "common" }
-
-# Wayland dependencies
-smithay-client-toolkit = "0.20"
-wayland-client = "0.31"
-wayland-protocols = "0.32"
-wayland-protocols-wlr = "0.3"
-
-# Image processing
-image = { version = "0.25", default-features = false }
-fast_image_resize = "6.0.0"
-resvg = "0.46.0"
-
-# Video processing (optional features)
-gstreamer = { version = "0.24.4" }
-gstreamer-video = { version = "0.24.4" }
-gstreamer-app = { version = "0.24.4" }
-
-# Graphics
-wgpu = { version = "28.0.0" }
-
 # Async runtime
-tokio = { version = "1.35", features = ["full"] }
+tokio = { version = "1.50", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+async-trait = "0.1"
 
-# IPC and serialization
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+toml = "1.0"
 
-# CLI
-clap = { version = "4.4", features = ["derive", "env"] }
+# GPU rendering
+wgpu = { version = "29.0", features = ["wgsl"] }
+bytemuck = { version = "1.25", features = ["derive"] }
+glam = { version = "0.32", features = ["serde"] }
 
-# Utilities
-anyhow = "1.0"
-thiserror = "2.0.18"
-log = "0.4"
-env_logger = "0.11"
-rayon = "1.8"
+# Image — avoid features that pull in rav1e (avif encoder, edition2024)
+image = { version = "0.25", default-features = false, features = [
+  "png",
+  "jpeg",
+  "gif",
+] }
+
+# Wayland
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+smithay-client-toolkit = "0.20"
+
+# Audio
+rustfft = "6.4"
+
+# Memory management
+memmap2 = "0.9"
+rustix = { version = "1.1.4", features = ["fs"] }
+
+# Filesystem / config
+notify = "8"
+dirs = "6"
+
+# Concurrency utilities
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+
+# System
+libc = "0.2.183"
+
+# Naga shader compiler
+naga = { version = "29.0", features = ["wgsl-in", "glsl-in"] }
+
+# fugures (for BoxFuture in factory)
+futures = "0.3"
+
+# Internal crate path deps
+render-core = { path = "render-core" }
+render-gpu = { path = "render-gpu" }
+render-cpu = { path = "render-cpu" }
+config-system = { path = "config-system" }
+shader-engine = { path = "shader-engine" }
+audio-engine = { path = "audio-engine" }
+wayland-backend = { path = "wayland-backend" }
+overlay-system = { path = "overlay-system" }
+wallpaper-runtime = { path = "wallpaper-runtime" }
+ipc-protocol = { path = "ipc-protocol" }
+
+[workspace.lints.rust]
+unsafe_code = "warn"
 
 [workspace.lints.clippy]
-correctness = { level = "deny", priority = -1 }
-suspicious = { level = "deny", priority = -1 }
-perf = { level = "deny", priority = -1 }
-style = { level = "warn", priority = -1 }
-complexity = { level = "warn", priority = -1 }
-
-[profile.dev]
-opt-level = 1
-
-[profile.dev.package."*"]
-opt-level = 3
-
-[profile.release]
-debug = 0
-lto = "thin"
-opt-level = 3
-codegen-units = 16
-strip = true
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+redundant_clone = "deny"
+nesdless_collect = "deny"
+missing_docs = "deny"
+cast_precision_loss = "allow"

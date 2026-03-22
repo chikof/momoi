@@ -1,0 +1,14 @@
+[package]
+name = "overlay-system"
+description = "Composable overlay widgets for wallpapers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tracing = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

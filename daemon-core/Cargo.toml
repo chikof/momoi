@@ -1,0 +1,43 @@
+
+[package]
+name = "daemon-core"
+description = "Main momoi daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "momoi"
+path = "src/main.rs"
+
+[dependencies]
+render-core = { workspace = true }
+render-gpu = { workspace = true }
+render-cpu = { workspace = true }
+wayland-backend = { workspace = true }
+shader-engine = { workspace = true }
+audio-engine = { workspace = true }
+wallpaper-runtime = { workspace = true }
+config-system = { workspace = true }
+overlay-system = { workspace = true }
+ipc-protocol = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }
+dirs = { workspace = true }
+libc = { workspace = true }
+futures = { workspace = true }
+
+[lints]
+workspace = true
+
+[features]
+# Enable real-time PipeWire audio capture.
+# Requires libpipewire development headers at build time.
+# When disabled, the daemon uses a silent fallback source.
+pipewire-audio = ["audio-engine/pipewire-audio"]

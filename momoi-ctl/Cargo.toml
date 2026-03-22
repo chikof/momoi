@@ -1,0 +1,23 @@
+[package]
+name = "momoi-ctl"
+description = "CLI control tool for the momoi daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "momoi-ctl"
+path = "src/main.rs"
+
+[dependencies]
+ipc-protocol = { path = "../ipc-protocol" }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+libc = { workspace = true }
+
+[lints]
+workspace = true

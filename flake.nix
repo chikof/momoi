@@ -10,164 +10,166 @@
     };
   };
 
-  outputs =
-    {
-      self,
-      nixpkgs,
-      flake-utils,
-      rust-overlay,
-    }:
-    let
-      # System-specific outputs
-      systemOutputs = flake-utils.lib.eachDefaultSystem (
-        system:
-        let
-          overlays = [ (import rust-overlay) ];
-          pkgs = import nixpkgs {
-            inherit system overlays;
-          };
+  outputs = {
+    self,
+    nixpkgs,
+    flake-utils,
+    rust-overlay,
+  }: let
+    # System-specific outputs
+    systemOutputs = flake-utils.lib.eachDefaultSystem (
+      system: let
+        overlays = [(import rust-overlay)];
+        pkgs = import nixpkgs {
+          inherit system overlays;
+        };
 
-          rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-            extensions = [
-              "rust-src"
-              "rust-analyzer"
-            ];
-          };
-
-          # Build dependencies for momoi
-          buildInputs = with pkgs; [
-            wayland
-            wayland-protocols
-            libxkbcommon
-            vulkan-loader
-            vulkan-headers
-            libGL
-            ffmpeg
-            gst_all_1.gstreamer
-            gst_all_1.gst-plugins-base
-            gst_all_1.gst-plugins-good
-            gst_all_1.gst-plugins-bad
-            gst_all_1.gst-plugins-ugly
-            gst_all_1.gst-libav
+        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+          extensions = [
+            "rust-src"
+            "rust-analyzer"
           ];
+        };
 
-          nativeBuildInputs = with pkgs; [
-            pkg-config
-            cmake
-            rustToolchain
-            makeWrapper
-          ];
+        # Build dependencies for momoi
+        buildInputs = with pkgs; [
+          wayland
+          wayland-protocols
+          libxkbcommon
+          vulkan-loader
+          vulkan-headers
+          libGL
+          ffmpeg
+          gst_all_1.gstreamer
+          gst_all_1.gst-plugins-base
+          gst_all_1.gst-plugins-good
+          gst_all_1.gst-plugins-bad
+          gst_all_1.gst-plugins-ugly
+          gst_all_1.gst-libav
+        ];
 
-          # Runtime libraries needed
-          runtimeLibs = with pkgs; [
-            wayland
-            libxkbcommon
-            vulkan-loader
-            libGL
-            ffmpeg
-            gst_all_1.gstreamer
-            gst_all_1.gst-plugins-base
-            gst_all_1.gst-plugins-good
-            gst_all_1.gst-plugins-bad
-            gst_all_1.gst-plugins-ugly
-            gst_all_1.gst-libav
-          ];
+        nativeBuildInputs = with pkgs; [
+          pkg-config
+          cmake
+          rustToolchain
+          pipewire
+          makeWrapper
+        ];
 
-        in
-        {
-          packages = {
-            default = pkgs.rustPlatform.buildRustPackage {
-              pname = "momoi";
-              version = "0.1.0";
+        # Runtime libraries needed
+        runtimeLibs = with pkgs; [
+          wayland
+          libxkbcommon
+          vulkan-loader
+          libGL
+          ffmpeg
+          gst_all_1.gstreamer
+          gst_all_1.gst-plugins-base
+          gst_all_1.gst-plugins-good
+          gst_all_1.gst-plugins-bad
+          gst_all_1.gst-plugins-ugly
+          gst_all_1.gst-libav
+        ];
+      in {
+        packages = {
+          default = pkgs.rustPlatform.buildRustPackage {
+            pname = "momoi";
+            version = "0.1.0";
 
-              src = pkgs.lib.cleanSource ./.;
+            src = pkgs.lib.cleanSource ./.;
 
-              cargoLock = {
-                lockFile = ./Cargo.lock;
-              };
+            cargoLock = {
+              lockFile = ./Cargo.lock;
+            };
 
-              inherit nativeBuildInputs buildInputs;
+            inherit nativeBuildInputs buildInputs;
 
-              # Build with all features
-              buildFeatures = [ "all" ];
+            # Build with all features
+            buildFeatures = ["all"];
 
-              # Add runtime library paths and GStreamer plugin paths
-              postInstall = ''
-                wrapProgram $out/bin/momoi \
-                  --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}" \
-                  --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${
-                    pkgs.lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" (
-                      with pkgs.gst_all_1;
-                      [
-                        gstreamer
-                        gst-plugins-base
-                        gst-plugins-good
-                        gst-plugins-bad
-                        gst-plugins-ugly
-                        gst-libav
-                      ]
-                    )
-                  }"
-              '';
+            # Add runtime library paths and GStreamer plugin paths
+            postInstall = ''
+              wrapProgram $out/bin/momoi \
+                --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath runtimeLibs}" \
+                --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : "${
+                pkgs.lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" (
+                  with pkgs.gst_all_1; [
+                    gstreamer
+                    gst-plugins-base
+                    gst-plugins-good
+                    gst-plugins-bad
+                    gst-plugins-ugly
+                    gst-libav
+                  ]
+                )
+              }"
+            '';
 
-              meta = with pkgs.lib; {
-                description = "Momoi - Advanced Wayland wallpaper daemon with support for images, videos, and animated wallpapers";
-                homepage = "https://github.com/chikof/momoi";
-                license = licenses.mit;
-                platforms = platforms.linux;
-                mainProgram = "momoi";
-              };
+            meta = with pkgs.lib; {
+              description = "Momoi - Advanced Wayland wallpaper daemon with support for images, videos, and animated wallpapers";
+              homepage = "https://github.com/chikof/momoi";
+              license = licenses.mit;
+              platforms = platforms.linux;
+              mainProgram = "momoi";
             };
           };
+        };
 
-          devShells.default = pkgs.mkShell {
-            inherit buildInputs;
+        devShells.default = pkgs.mkShell {
+          inherit buildInputs;
 
-            nativeBuildInputs =
-              nativeBuildInputs
-              ++ (with pkgs; [
-                # Development tools
-                cargo-watch
-                cargo-edit
-                cargo-expand
-                rustfmt
-                clippy
+          nativeBuildInputs =
+            nativeBuildInputs
+            ++ (with pkgs; [
+              # Development tools
+              cargo-watch
+              cargo-edit
+              cargo-expand
+              rustfmt
+              clippy
 
-                # Debugging and profiling
-                gdb
-                valgrind
+              # Debugging and profiling
+              gdb
+              valgrind
 
-                # Additional utilities
-                wayland-utils
-                vulkan-tools
-              ]);
+              # Additional utilities
+              wayland-utils
+              vulkan-tools
 
-            # Environment variables for development
-            RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
-            LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (buildInputs ++ runtimeLibs);
-            PKG_CONFIG_PATH = "${pkgs.lib.makeSearchPath "lib/pkgconfig" buildInputs}";
+              llvmPackages.libclang
+            ]);
 
-            shellHook = ''
-              echo "Momoi - Wayland Wallpaper Daemon"
-              echo "===================================="
-              echo "Rust version: $(rustc --version)"
-              echo "Cargo version: $(cargo --version)"
-              echo ""
-              echo "Available commands:"
-              echo "  cargo build          - Build the project"
-              echo "  cargo run            - Run the daemon"
-              echo "  cargo test           - Run tests"
-              echo "  cargo watch          - Watch for changes and rebuild"
-              echo "  cargo clippy         - Run linter"
-              echo ""
-              echo "To build the Nix package: nix build"
-              echo "To update flake: nix flake update"
-              echo ""
-            '';
-          };
-        }
-      );
-    in
+          # Environment variables for development
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+          BINDGEN_EXTRA_CLANG_ARGS = with pkgs; ''
+            -isystem ${llvmPackages.libclang.lib}/lib/clang/${lib.getVersion clang}/include
+            -isystem ${glibc.dev}/include
+          '';
+          RUST_SRC_PATH = "${rustToolchain}/lib/rustlib/src/rust/library";
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (buildInputs ++ runtimeLibs);
+          PKG_CONFIG_PATH = "${pkgs.lib.makeSearchPath "lib/pkgconfig" buildInputs}";
+
+          shellHook = ''
+            echo "Momoi - Wayland Wallpaper Daemon"
+            echo "===================================="
+            echo "Rust version: $(rustc --version)"
+            echo "Cargo version: $(cargo --version)"
+            echo ""
+            echo "Available commands:"
+            echo "  cargo build          - Build the project"
+            echo "  cargo run            - Run the daemon"
+            echo "  cargo test           - Run tests"
+            echo "  cargo watch          - Watch for changes and rebuild"
+            echo "  cargo clippy         - Run linter"
+            echo ""
+            echo "To build the Nix package: nix build"
+            echo "To update flake: nix flake update"
+            echo ""
+          '';
+        };
+      }
+    );
+  in
     systemOutputs
     // {
       # NixOS modules
@@ -181,12 +183,10 @@
         # Helper for easy setup - automatically passes momoiFlake
         # Usage:
         #   modules = [ (inputs.momoi.nixosModules.autoload { inherit inputs; }) ];
-        autoload =
-          { inputs }:
-          {
-            imports = [ (import ./nix/modules/nixos.nix) ];
-            _module.args.momoiFlake = inputs.momoi;
-          };
+        autoload = {inputs}: {
+          imports = [(import ./nix/modules/nixos.nix)];
+          _module.args.momoiFlake = inputs.momoi;
+        };
       };
 
       # Home Manager modules
@@ -200,12 +200,10 @@
         # Helper for easy setup - automatically passes momoiFlake
         # Usage:
         #   modules = [ (inputs.momoi.homeManagerModules.autoload { inherit inputs; }) ];
-        autoload =
-          { inputs }:
-          {
-            imports = [ (import ./nix/modules/home-manager.nix) ];
-            _module.args.momoiFlake = inputs.momoi;
-          };
+        autoload = {inputs}: {
+          imports = [(import ./nix/modules/home-manager.nix)];
+          _module.args.momoiFlake = inputs.momoi;
+        };
       };
     };
 }

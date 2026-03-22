@@ -1,0 +1,17 @@
+[package]
+name = "render-cpu"
+description = "Software/CPU fallback renderer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+render-core = { workspace = true }
+image = { workspace = true }
+glam = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+bytemuck = { workspace = true }
+
+[lints]
+workspace = true

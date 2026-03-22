@@ -1,0 +1,45 @@
+# ~/.config/momoi/config.toml
+#
+# Copy this file to the path above and edit as required.
+# momoi hot-reloads this file; no restart needed.
+
+fps = 60
+prefer_gpu = true
+
+[audio]
+enabled = true
+fft_size = 1024
+# device = "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor"
+
+[overlay]
+clock = true
+system_stats = false
+# custom_text  = "Hello, Hyprland!"
+
+[[outputs]]
+name = "DP-1"
+
+[outputs.wallpaper]
+type = "audio_reactive"
+shader = "~/.config/momoi/shaders/audio_reactive.wgsl"
+
+[[outputs]]
+name = "DP-2"
+
+[outputs.wallpaper]
+type = "image"
+path = "~/.config/momoi/wallpapers/static.png"
+
+# [[outputs]]
+# name = "DP-2"
+#
+# [outputs.wallpaper]
+# type = "time_based"
+#
+# [outputs.wallpaper.day]
+# type   = "shader"
+# shader = "~/.config/momoi/shaders/daytime.wgsl"
+#
+# [outputs.wallpaper.night]
+# type   = "audio_reactive"
+# shader = "~/.config/momoi/shaders/audio_reactive.wgsl"

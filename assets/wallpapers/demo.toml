@@ -1,0 +1,25 @@
+# demo.toml — example wallpaper config for momoi
+#
+# Place in ~/.config/momoi/wallpapers/demo.toml
+# Reference it from ~/.config/momoi/config.toml
+
+[wallpaper]
+name = "Audio Reactive Nebula"
+author = "momoi example"
+version = "1.0"
+
+# A single audio-reactive shader shown on all outputs.
+[[output]]
+name = "*"                     # wildcard matches every output
+type = "audio_reactive"
+shader = "audio_reactive.wgsl"
+fps = 60
+bands = 32
+
+[output.audio]
+enabled = true
+fft_size = 1024
+
+[output.overlay]
+clock = true
+system_stats = false

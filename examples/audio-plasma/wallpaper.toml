@@ -1,0 +1,26 @@
+name = "Audio Plasma"
+description = "A real-time WGSL shader that pulses with bass and shifts hue over time."
+
+mode = "shader"
+
+[shader]
+source = "plasma.wgsl"
+language = "WGSL"
+
+[[shader.uniforms]]
+name = "speed"
+default = 1.0
+
+[[shader.uniforms]]
+name = "complexity"
+default = 3.0
+
+[audio]
+enabled = true
+fft_bins = 64
+
+[[overlays]]
+kind = "clock"
+x = 0.05
+y = 0.05
+font_size = 36.0

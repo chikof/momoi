@@ -1,0 +1,19 @@
+[package]
+name = "render-gpu"
+description = "wgpu-based GPU renderer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+render-core = { workspace = true }
+shader-engine = { workspace = true }
+wgpu = { workspace = true }
+bytemuck = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+
+[lints]
+workspace = true

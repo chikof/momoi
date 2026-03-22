@@ -1,0 +1,30 @@
+[package]
+name = "shader-engine"
+description = "Shader compilation, validation, and hot-reload"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+render-core = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+
+# GPU pipeline creation (requires wgpu)
+wgpu = { workspace = true, optional = true }
+# shader compilation/validation (requires naga)
+naga = { workspace = true, optional = true }
+# hot-reload file watching
+notify = { workspace = true, optional = true }
+
+[features]
+default = ["compile", "hot-reload", "gpu-pipeline"]
+compile = ["dep:naga"]
+hot-reload = ["dep:notify"]
+gpu-pipeline = ["dep:wgpu", "dep:naga"]
+
+[lints]
+workspace = true

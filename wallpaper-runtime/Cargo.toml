@@ -1,0 +1,22 @@
+[package]
+name = "wallpaper-runtime"
+description = "Wallpaper execution engine — per-output render loop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+render-core = { workspace = true }
+audio-engine = { workspace = true }
+config-system = { workspace = true }
+overlay-system = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+libc = { workspace = true }
+image = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

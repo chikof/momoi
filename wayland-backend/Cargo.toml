@@ -1,0 +1,24 @@
+[package]
+name = "wayland-backend"
+description = "Wayland layer-shell surface management"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+render-core = { workspace = true }
+wayland-client = { workspace = true }
+wayland-protocols = { workspace = true }
+wayland-protocols-wlr = { workspace = true }
+smithay-client-toolkit = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+serde = { workspace = true }
+bytemuck = { workspace = true }
+libc = { workspace = true }
+memmap2 = { workspace = true }
+
+[lints]
+workspace = true
