@@ -1,6 +1,7 @@
 //! Core overlay widget trait and geometry types.
 
 use crate::OverlayError;
+use serde::{Deserialize, Serialize};
 
 /// Rectangular region on the output surface.
 #[derive(Debug, Clone, Copy, Default)]
@@ -15,14 +16,28 @@ pub struct WidgetRect {
     pub height: u32,
 }
 
+/// Screen corner or edge anchor for widget positioning.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+pub enum WidgetAnchor {
+    /// Top-left corner.
+    #[default]
+    TopLeft,
+    /// Top-right corner.
+    TopRight,
+    /// Bottom-left corner.
+    BottomLeft,
+    /// Bottom-right corner.
+    BottomRight,
+    /// Centred on screen.
+    Centre,
+}
+
 /// Every overlay element must implement this trait.
 pub trait OverlayWidget: Send + Sync {
     /// Refresh internal state. Called once per frame before [`render`](Self::render).
     fn update(&mut self);
 
     /// Produce RGBA pixel data for the widget's bounding box.
-    ///
-    /// `width` and `height` match the dimensions returned by [`bounds`](Self::bounds).
     ///
     /// # Errors
     /// Returns [`OverlayError::Render`] on rasterisation failure.

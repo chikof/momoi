@@ -27,7 +27,13 @@ impl GpuRenderer {
     /// # Errors
     /// Returns [`RenderError::InitFailed`] if no suitable wgpu adapter is found.
     pub async fn new(registry: ShaderRegistry) -> Result<Self, RenderError> {
-        let instance = wgpu::Instance::default();
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::VULKAN | wgpu::Backends::GL,
+            flags: wgpu::InstanceFlags::empty(),
+            backend_options: wgpu::BackendOptions::default(),
+            memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
+            display: None,
+        });
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {

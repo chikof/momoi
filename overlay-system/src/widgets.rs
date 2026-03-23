@@ -24,6 +24,7 @@ const GLYPH_H: u32 = 7;
 const GLYPH_GAP: u32 = 1; // pixels between glyphs
 
 /// 5×7 bitmap for '0'–'9' and ':'.
+#[allow(clippy::unreadable_literal)]
 static DIGITS: [u8; 11 * 5] = [
     0b0111110, 0b1000001, 0b1000001, 0b1000001, 0b0111110, // 0
     0b0000000, 0b1000010, 0b1111111, 0b1000000, 0b0000000, // 1
@@ -37,6 +38,8 @@ static DIGITS: [u8; 11 * 5] = [
     0b0000110, 0b1001001, 0b1001001, 0b1001001, 0b0111110, // 9
     0b0000000, 0b0100100, 0b0100100, 0b0000000, 0b0000000, // : (index 10)
 ];
+
+const MARGIN: u32 = 20;
 
 /// Return a glyph slice for a `char` in the set `0–9` and `:`.
 fn glyph_for(c: char) -> Option<&'static [u8]> {
@@ -52,11 +55,12 @@ fn glyph_for(c: char) -> Option<&'static [u8]> {
 ///
 /// Returns `(buffer, pixel_width, pixel_height)`.
 fn render_text(text: &str, fg: [u8; 4], bg: [u8; 4]) -> (Vec<u8>, u32, u32) {
-    let n_glyphs = text.chars().filter(|c| glyph_for(*c).is_some()).count() as u32;
-    if n_glyphs == 0 {
+    let n_glyphs = text.chars().filter(|c| glyph_for(*c).is_some()).count();
+    let Ok(n) = u32::try_from(n_glyphs) else {
         return (Vec::new(), 0, 0);
-    }
-    let w = n_glyphs * (GLYPH_W + GLYPH_GAP) - GLYPH_GAP;
+    };
+
+    let w = n * (GLYPH_W + GLYPH_GAP) - GLYPH_GAP;
     let h = GLYPH_H;
     let mut buf = vec![bg[0], bg[1], bg[2], bg[3]];
     buf = buf.repeat((w * h) as usize);
@@ -95,6 +99,9 @@ pub struct ClockWidget {
     /// Cached rendered buffer (refreshed once per second).
     cache: Option<(Vec<u8>, u32, u32)>,
     last_second: u64,
+    /// Screen dimensions — needed to compute anchor position.
+    screen_w: u32,
+    screen_h: u32,
 }
 
 impl ClockWidget {
@@ -109,7 +116,15 @@ impl ClockWidget {
             scale: scale.max(1),
             cache: None,
             last_second: 0,
+            screen_w: 1920,
+            screen_h: 1080,
         }
+    }
+
+    /// Set the output dimensions so the anchor calculates the correct position.
+    pub fn set_screen_size(&mut self, w: u32, h: u32) {
+        self.screen_w = w;
+        self.screen_h = h;
     }
 
     fn current_time_string() -> (String, u64) {
@@ -173,14 +188,23 @@ impl OverlayWidget for ClockWidget {
     }
 
     fn bounds(&self) -> WidgetRect {
-        let (w, h) = self
-            .cache
-            .as_ref()
-            .map(|(_, w, h)| (*w, *h))
-            .unwrap_or((80, 21));
+        let (w, h) = self.cache.as_ref().map_or((80, 21), |(_, w, h)| (*w, *h));
+        let (x, y) = match self.anchor {
+            WidgetAnchor::TopLeft => (MARGIN, MARGIN),
+            WidgetAnchor::TopRight => (self.screen_w.saturating_sub(w + MARGIN), MARGIN),
+            WidgetAnchor::BottomLeft => (MARGIN, self.screen_h.saturating_sub(h + MARGIN)),
+            WidgetAnchor::BottomRight => (
+                self.screen_w.saturating_sub(w + MARGIN),
+                self.screen_h.saturating_sub(h + MARGIN),
+            ),
+            WidgetAnchor::Centre => (
+                (self.screen_w / 2).saturating_sub(w / 2),
+                (self.screen_h / 2).saturating_sub(h / 2),
+            ),
+        };
         WidgetRect {
-            x: 20,
-            y: 20,
+            x,
+            y,
             width: w,
             height: h,
         }
@@ -218,21 +242,29 @@ impl SystemStatsWidget {
         let Ok(f) = std::fs::File::open("/proc/stat") else {
             return 0.0;
         };
-        let line = BufReader::new(f).lines().next().and_then(|l| l.ok());
+
+        let line = BufReader::new(f)
+            .lines()
+            .next()
+            .and_then(std::result::Result::ok);
+
         let Some(line) = line else { return 0.0 };
         let nums: Vec<u64> = line
             .split_whitespace()
             .skip(1)
             .filter_map(|s| s.parse().ok())
             .collect();
+
         if nums.len() < 4 {
             return 0.0;
         }
+
         let idle = nums[3];
         let total: u64 = nums.iter().sum();
         if total == 0 {
             return 0.0;
         }
+
         (1.0 - idle as f32 / total as f32) * 100.0
     }
 
@@ -284,9 +316,6 @@ impl OverlayWidget for SystemStatsWidget {
             self.last_update = now;
             let cpu = Self::read_cpu_percent();
             let ram = Self::read_ram_used_mb();
-            let text = format!("{cpu:.0}%CPU  {ram}MB");
-            // Render using only digits/letters we support — for a demo,
-            // just the numeric part.
             let cpu_str = format!("CPU:{cpu:.0}  RAM:{ram}");
             let chars: String = cpu_str
                 .chars()
@@ -306,14 +335,12 @@ impl OverlayWidget for SystemStatsWidget {
     }
 
     fn bounds(&self) -> WidgetRect {
-        let (w, h) = self
-            .cache
-            .as_ref()
-            .map(|(_, w, h)| (*w, *h))
-            .unwrap_or((120, 7));
+        let (w, h) = self.cache.as_ref().map_or((120, 7), |(_, w, h)| (*w, *h));
+        // Place below where the clock sits at TopRight with scale=3
+        // Clock height: 7 * 3 = 21px + margin 20 + gap 8 = y:49
         WidgetRect {
             x: 20,
-            y: 50,
+            y: 49,
             width: w,
             height: h,
         }
@@ -346,7 +373,6 @@ mod tests {
     #[test]
     fn render_text_should_produce_correct_buffer_size() {
         let (buf, w, h) = render_text("12:34", [255, 255, 255, 255], [0, 0, 0, 0]);
-        // "12:34" = 5 glyphs × (5 + 1) - 1 = 29 wide, 7 tall
         assert_eq!(w, 29);
         assert_eq!(h, 7);
         assert_eq!(buf.len(), (w * h * 4) as usize);
@@ -361,7 +387,7 @@ mod tests {
 
     #[test]
     fn scale_up_should_quadruple_buffer_for_scale_2() {
-        let src = vec![255u8; 4]; // 1×1 pixel
+        let src = vec![255u8; 4];
         let (dst, dw, dh) = ClockWidget::scale_up(&src, 1, 1, 2);
         assert_eq!((dw, dh), (2, 2));
         assert_eq!(dst.len(), 2 * 2 * 4);

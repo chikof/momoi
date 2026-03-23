@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use audio_engine::{AudioSource, SilentSource};
 use config_system::DaemonConfig;
 use ipc_protocol::OutputStatus;
+use overlay_system::{ClockWidget, SystemStatsWidget, WidgetAnchor};
 use render_core::{DynRenderer, OutputInfo, PixelFormat::Rgba8Unorm, Renderer, SurfaceDescriptor};
 use render_cpu::CpuRenderer;
 use render_gpu::GpuRenderer;
@@ -169,7 +170,20 @@ impl Orchestrator {
             .insert(output.name.clone(), Arc::clone(&dyn_renderer));
         self.wallpaper_names.insert(output.name.clone(), label);
 
-        let ctx = WallpaperContext::new(output.clone(), dyn_renderer, audio);
+        let mut ctx = WallpaperContext::new(output.clone(), dyn_renderer, audio);
+
+        if self.config.overlay.clock {
+            let mut clock = ClockWidget::new(WidgetAnchor::TopRight, [255, 255, 255, 220], 3);
+            clock.set_screen_size(output.width, output.height);
+            ctx.overlays.add(clock);
+            info!(output = %output.name, "clock overlay enabled");
+        }
+
+        if self.config.overlay.system_stats {
+            ctx.overlays.add(SystemStatsWidget::new(2));
+            info!(output = %output.name, "system stats overlay enabled");
+        }
+
         let runner = WallpaperRunner::new(ctx, self.config.fps);
         let shutdown = self.shutdown.clone();
         let frame_tx = self.frame_tx.clone();
@@ -179,13 +193,18 @@ impl Orchestrator {
         let handle = std::thread::Builder::new()
             .name(format!("render-{output_name}"))
             .spawn(move || {
-                if let Err(e) = runner.run_with_sender_counted(
-                    &shutdown,
-                    &frame_tx,
-                    &output_name.clone(),
-                    &counter_thread,
-                ) {
-                    error!(output = %output_name, error = %e, "render thread crashed");
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    runner.run_with_sender_counted(
+                        &shutdown,
+                        &frame_tx,
+                        &output_name.clone(),
+                        &counter_thread,
+                    )
+                }));
+                match result {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => error!(output = %output_name, error = %e, "render thread error"),
+                    Err(_) => error!(output = %output_name, "render thread panicked"),
                 }
             })
             .context("failed to spawn render thread")?;

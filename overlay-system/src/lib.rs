@@ -2,12 +2,12 @@
 //!
 //! Composable overlay elements rendered on top of wallpapers.
 
-pub mod clock;
 pub mod compositor;
 pub mod error;
 pub mod widget;
+pub mod widgets;
 
-pub use clock::ClockWidget;
 pub use compositor::OverlayCompositor;
 pub use error::OverlayError;
-pub use widget::{OverlayWidget, WidgetRect};
+pub use widget::{OverlayWidget, WidgetAnchor, WidgetRect};
+pub use widgets::{ClockWidget, SystemStatsWidget};
