@@ -28,7 +28,12 @@ use tracing::{error, info};
 use wayland_client::{
     Connection, Dispatch, EventQueue, QueueHandle,
     globals::registry_queue_init,
-    protocol::{wl_buffer, wl_output::WlOutput, wl_shm_pool, wl_surface::WlSurface},
+    protocol::{
+        wl_buffer,
+        wl_output::{Transform, WlOutput},
+        wl_shm_pool,
+        wl_surface::WlSurface,
+    },
 };
 use wayland_protocols::wp::linux_dmabuf::zv1::client::zwp_linux_dmabuf_v1::ZwpLinuxDmabufV1;
 
@@ -335,14 +340,36 @@ impl OutputHandler for MonitorManager {
             return;
         };
 
+        let rotated = matches!(
+            info.transform,
+            Transform::_90 | Transform::_270 | Transform::Flipped90 | Transform::Flipped270
+        );
+        let (width, height) = if rotated {
+            (
+                mode.dimensions.1.cast_unsigned(),
+                mode.dimensions.0.cast_unsigned(),
+            )
+        } else {
+            (
+                mode.dimensions.0.cast_unsigned(),
+                mode.dimensions.1.cast_unsigned(),
+            )
+        };
+
         let output_info = OutputInfo {
             name: info.name.clone().unwrap_or_else(|| "unknown".into()),
-            width: mode.dimensions.0.cast_unsigned(),
-            height: mode.dimensions.1.cast_unsigned(),
+            width,
+            height,
             refresh_mhz: mode.refresh_rate.cast_unsigned(),
             scale: f64::from(info.scale_factor),
         };
-        info!(output = %output_info.name, width = output_info.width, "output connected");
+        info!(
+            output = %output_info.name,
+            width = output_info.width,
+            height = output_info.height,
+            rotated,
+            "output connected"
+        );
         self.outputs.push(output_info.clone());
 
         let wl_surface = self.compositor_state.create_surface(qh);
